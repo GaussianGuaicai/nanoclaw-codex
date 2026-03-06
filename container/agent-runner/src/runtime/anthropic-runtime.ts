@@ -87,15 +87,21 @@ export class AnthropicRuntime implements AgentRuntime {
     let messageCount = 0;
     let resultCount = 0;
 
-    // Load global CLAUDE.md as additional system context (shared across all groups)
-    const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
+    // Load global AGENTS.md as additional system context (shared across all groups)
+    // Fallback to legacy CLAUDE.md for backward compatibility.
+    const globalAgentsMdPath = '/workspace/global/AGENTS.md';
+    const globalLegacyClaudeMdPath = '/workspace/global/CLAUDE.md';
     let globalClaudeMd: string | undefined;
-    if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
-      globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
+    if (!containerInput.isMain) {
+      if (fs.existsSync(globalAgentsMdPath)) {
+        globalClaudeMd = fs.readFileSync(globalAgentsMdPath, 'utf-8');
+      } else if (fs.existsSync(globalLegacyClaudeMdPath)) {
+        globalClaudeMd = fs.readFileSync(globalLegacyClaudeMdPath, 'utf-8');
+      }
     }
 
     // Discover additional directories mounted at /workspace/extra/*
-    // These are passed to the SDK so their CLAUDE.md files are loaded automatically
+    // These are passed to the SDK so their AGENTS.md files are loaded automatically
     const extraDirs: string[] = [];
     const extraBase = '/workspace/extra';
     if (fs.existsSync(extraBase)) {

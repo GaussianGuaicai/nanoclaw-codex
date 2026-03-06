@@ -1,71 +1,73 @@
-# Anthropic Agent SDK → Codex SDK Mapping (Phase 1)
+# Anthropic Agent SDK → Codex SDK Mapping
 
-This document records the migration surface from NanoClaw's current Anthropic runtime to a future Codex runtime.
+This document records the migration surface from NanoClaw's current Anthropic runtime to Codex runtime support.
 
 ## Status legend
 
-- ✅ direct or near-direct mapping expected
-- ⚠️ requires design/refactor
-- ❓ needs Codex runtime validation before implementation
+- ✅ implemented
+- ⚠️ partial (works, but behavior differs)
+- ❓ pending design/validation
 
 ## Runtime invocation
 
-- Anthropic today: `query({ prompt, options })` stream in `container/agent-runner/src/runtime/anthropic-runtime.ts`.
-- Target Codex: thread/run model in Codex SDK (resume by thread ID).
+- Anthropic: `query({ prompt, options })` stream in `container/agent-runner/src/runtime/anthropic-runtime.ts`.
+- Codex: thread-based runtime in `container/agent-runner/src/runtime/codex-runtime.ts`.
 - Status: ⚠️
 
 Notes:
-- Phase 1 introduced `AgentRuntime` abstraction so the main query loop no longer depends on Anthropic message schema.
+- `NANOCLAW_AGENT_PROVIDER=anthropic|codex` now selects runtime at startup.
+- Anthropic runtime streams intermediate events; Codex runtime currently runs one prompt/one result per loop iteration.
 
 ## Session continuity
 
-- Anthropic today: `resume` + `resumeSessionAt`, while tracking `session_id` and last assistant `uuid`.
-- Target Codex: runtime-specific continuation cursor + thread identifier.
+- Anthropic: `resume` + `resumeSessionAt` with last assistant UUID cursor.
+- Codex: uses thread resume via `resumeThread(sessionId)`.
 - Status: ⚠️
 
 Notes:
-- Phase 1 standardizes return shape as `RunQueryResult` (`newSessionId`, `lastAssistantUuid`, `closedDuringQuery`).
+- Codex runtime ignores `resumeAt` cursor for now (logged as informational).
+- `newSessionId` comes from thread id when available.
 
 ## Hooks: compaction and tool sanitization
 
-- Anthropic today:
-  - `PreCompact` archives transcript before compaction.
-  - `PreToolUse(Bash)` injects `unset` for sensitive env vars.
-- Target Codex:
-  - replicate behavior via Codex SDK hooks/events or a runtime middleware layer.
+- Anthropic: `PreCompact` and `PreToolUse(Bash)` hooks are active.
+- Codex: no equivalent hooks wired yet in runtime.
 - Status: ❓
-
-Notes:
-- Phase 1 keeps both behaviors as runtime hooks passed from `index.ts` so they are already isolated from loop logic.
 
 ## Tool and permissions configuration
 
-- Anthropic today: `allowedTools`, `permissionMode: bypassPermissions`, `allowDangerouslySkipPermissions`.
-- Target Codex: Codex sandbox + approval policy equivalents.
-- Status: ⚠️
-
-Notes:
-- Phase 1 preserves existing Anthropic behavior unchanged.
-- Codex phase should default to least-privilege and move elevated mode behind explicit config.
+- Anthropic: explicit `allowedTools` + bypass permission mode.
+- Codex: uses Codex SDK defaults in current runtime implementation.
+- Status: ❓
 
 ## MCP server wiring
 
-- Anthropic today: `mcpServers.nanoclaw` with `node ipc-mcp-stdio.js`.
-- Target Codex: equivalent MCP registration/injection in Codex runtime.
-- Status: ✅ (conceptually) / ❓ (API details)
+- Anthropic: `mcpServers.nanoclaw` with `node ipc-mcp-stdio.js`.
+- Codex: MCP server wiring is not yet implemented in runtime.
+- Status: ❓
 
-## Global instructions and additional directories
+## Secrets and auth handoff
 
-- Anthropic today:
-  - append `/workspace/global/CLAUDE.md` to system prompt preset
-  - pass `/workspace/extra/*` as additional directories
-- Target Codex:
-  - equivalent instruction/context injection strategy.
-- Status: ⚠️
+- Container secret allowlist now includes `OPENAI_API_KEY`.
+- Bash sanitization hook now unsets `OPENAI_API_KEY` in addition to Anthropic auth vars.
+- Status: ✅
 
-## Phase-1 deliverables completed
+## Completed migration phases
+
+### Phase 1 (completed)
 
 1. Introduced runtime abstraction (`AgentRuntime`) and provider factory.
 2. Moved Anthropic-specific query implementation to `runtime/anthropic-runtime.ts`.
-3. Added provider switch (`NANOCLAW_AGENT_PROVIDER`), defaulting to `anthropic`.
-4. Added explicit error for `codex` provider while implementation is pending.
+3. Decoupled main loop in `index.ts` from Anthropic event schema.
+
+### Phase 2 (completed in this change)
+
+1. Implemented a minimal Codex runtime adapter (`runtime/codex-runtime.ts`).
+2. Enabled actual provider switching to Codex in runtime factory.
+3. Added OpenAI key pass-through (`OPENAI_API_KEY`) for container runtime.
+
+## Next phase
+
+1. Add Codex runtime parity for MCP tool wiring.
+2. Add Codex-side equivalent for pre-tool sanitization and pre-compaction archiving.
+3. Align permission/sandbox policy behavior across Anthropic and Codex modes.

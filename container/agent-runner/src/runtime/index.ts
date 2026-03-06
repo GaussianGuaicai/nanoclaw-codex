@@ -1,4 +1,5 @@
 import { AnthropicRuntime } from './anthropic-runtime.js';
+import { CodexRuntime } from './codex-runtime.js';
 import { AgentRuntime, RuntimeHooks } from './types.js';
 
 export type AgentProvider = 'anthropic' | 'codex';
@@ -17,7 +18,7 @@ export function createAgentRuntime(
   ipcPollMs: number,
 ): AgentRuntime {
   if (provider === 'codex') {
-    throw new Error('Codex runtime is not implemented yet. Set NANOCLAW_AGENT_PROVIDER=anthropic.');
+    return new CodexRuntime(hooks);
   }
 
   return new AnthropicRuntime(hooks, shouldClose, drainIpcInput, ipcPollMs);

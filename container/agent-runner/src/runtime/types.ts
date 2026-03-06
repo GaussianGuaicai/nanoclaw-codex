@@ -1,5 +1,3 @@
-import type { HookCallback } from '@anthropic-ai/claude-agent-sdk';
-
 export interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -11,11 +9,13 @@ export interface ContainerInput {
   secrets?: Record<string, string>;
 }
 
+export type RuntimeHook = (...args: any[]) => any;
+
 export interface RuntimeHooks {
   onLog: (message: string) => void;
   onResult: (result: string | null, newSessionId?: string) => void;
-  onPreCompact: HookCallback;
-  onPreToolUseBash: HookCallback;
+  onPreCompact: RuntimeHook;
+  onPreToolUseBash: RuntimeHook;
 }
 
 export interface RunQueryInput {

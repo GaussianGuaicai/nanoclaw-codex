@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { HookCallback, query } from '@anthropic-ai/claude-agent-sdk';
 
 import { AgentRuntime, RunQueryInput, RunQueryResult, RuntimeHooks } from './types.js';
 
@@ -146,8 +146,8 @@ export class AnthropicRuntime implements AgentRuntime {
           },
         },
         hooks: {
-          PreCompact: [{ hooks: [this.hooks.onPreCompact] }],
-          PreToolUse: [{ matcher: 'Bash', hooks: [this.hooks.onPreToolUseBash] }],
+          PreCompact: [{ hooks: [this.hooks.onPreCompact as HookCallback] }],
+          PreToolUse: [{ matcher: 'Bash', hooks: [this.hooks.onPreToolUseBash as HookCallback] }],
         },
       },
     })) {

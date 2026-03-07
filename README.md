@@ -110,6 +110,16 @@ npm test
 
 `npm run build` now compiles both the host TypeScript project and the local worker under `container/agent-runner/`.
 
+Useful local setup/debug shortcuts:
+
+```bash
+npm run setup:environment  # inspect env, auth, registered groups
+npm run setup:worker       # rebuild and verify the local Codex worker
+npm run setup:service      # generate and load the launchd/systemd service
+npm run setup:verify       # end-to-end install health check
+tail -f logs/nanoclaw.log  # live service log
+```
+
 ## Architecture
 
 ```text

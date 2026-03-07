@@ -94,7 +94,22 @@ function copySnapshot(
 
   const stat = fs.statSync(sourcePath);
   if (stat.isDirectory()) {
-    fs.cpSync(sourcePath, targetPath, { recursive: true });
+    const resolvedSource = path.resolve(sourcePath);
+    const resolvedTarget = path.resolve(targetPath);
+    const isWithin = (candidate: string, ancestor: string): boolean =>
+      candidate === ancestor || candidate.startsWith(`${ancestor}${path.sep}`);
+
+    if (isWithin(resolvedTarget, resolvedSource)) {
+      fs.mkdirSync(targetPath, { recursive: true });
+      for (const entry of fs.readdirSync(sourcePath)) {
+        const entrySource = path.join(sourcePath, entry);
+        if (isWithin(resolvedTarget, path.resolve(entrySource))) continue;
+        fs.cpSync(entrySource, path.join(targetPath, entry), { recursive: true });
+      }
+    } else {
+      fs.cpSync(sourcePath, targetPath, { recursive: true });
+    }
+
     for (const entry of options?.removeEntries || []) {
       fs.rmSync(path.join(targetPath, entry), { recursive: true, force: true });
     }

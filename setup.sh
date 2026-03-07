@@ -88,6 +88,15 @@ install_deps() {
     return
   fi
 
+  log "Running npm ci for container/agent-runner"
+  if npm ci --prefix container/agent-runner >> "$LOG_FILE" 2>&1; then
+    log "agent-runner dependency install succeeded"
+  else
+    DEPS_OK="false"
+    log "agent-runner dependency install failed"
+    return
+  fi
+
   # Verify native module (better-sqlite3)
   log "Verifying native modules"
   if node -e "require('better-sqlite3')" >> "$LOG_FILE" 2>&1; then

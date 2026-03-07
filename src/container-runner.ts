@@ -29,6 +29,7 @@ export interface AgentRuntimePaths {
   codexHome: string;
   additionalDirectories: string[];
   writableRoots: string[];
+  sharedInstructionFiles: string[];
 }
 
 export interface ContainerInput {
@@ -108,6 +109,17 @@ function dedupePaths(paths: string[]): string[] {
   return result;
 }
 
+function findInstructionFile(rootPath: string): string | null {
+  for (const filename of ['AGENTS.md', 'CLAUDE.md']) {
+    const candidate = path.join(rootPath, filename);
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 function resolveSnapshotTarget(
   contextRoot: string,
   containerPath: string,
@@ -149,6 +161,7 @@ export function buildAgentExecutionLayout(
   const snapshotMappings: SnapshotMapping[] = [];
   const writableRoots: string[] = [];
   const additionalDirectories: string[] = [];
+  const sharedInstructionFiles: string[] = [];
   const readonlySnapshots: Array<{ sourcePath: string; targetPath: string }> =
     [];
 
@@ -191,6 +204,10 @@ export function buildAgentExecutionLayout(
 
       writableRoots.push(mount.hostPath);
       additionalDirectories.push(mount.hostPath);
+      const instructionFile = findInstructionFile(mount.hostPath);
+      if (instructionFile) {
+        sharedInstructionFiles.push(instructionFile);
+      }
       snapshotMappings.push({
         sourcePath: mount.hostPath,
         targetPath: mount.hostPath,
@@ -203,6 +220,10 @@ export function buildAgentExecutionLayout(
     fs.mkdirSync(contextRoot, { recursive: true });
     for (const snapshot of readonlySnapshots) {
       copySnapshot(snapshot.sourcePath, snapshot.targetPath);
+      const instructionFile = findInstructionFile(snapshot.targetPath);
+      if (instructionFile) {
+        sharedInstructionFiles.push(instructionFile);
+      }
       snapshotMappings.push({
         sourcePath: snapshot.sourcePath,
         targetPath: snapshot.targetPath,
@@ -218,6 +239,7 @@ export function buildAgentExecutionLayout(
     codexHome,
     additionalDirectories: dedupePaths(additionalDirectories),
     writableRoots: dedupePaths(writableRoots),
+    sharedInstructionFiles: dedupePaths(sharedInstructionFiles),
     snapshotMappings,
   };
 }

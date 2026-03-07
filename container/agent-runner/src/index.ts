@@ -17,6 +17,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { resolveMcpServerLaunch } from './mcp-launch.js';
 import { createAgentRuntime } from './runtime/index.js';
 import { ContainerInput } from './runtime/types.js';
 
@@ -151,7 +152,7 @@ async function main(): Promise<void> {
   const closeSentinelPath = path.join(ipcInputDir, '_close');
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
+  const mcpServer = resolveMcpServerLaunch(__dirname);
   const runtime = createAgentRuntime(
     {
       onLog: log,
@@ -183,7 +184,15 @@ async function main(): Promise<void> {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runtime.runQuery({ prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt });
+      const queryResult = await runtime.runQuery({
+        prompt,
+        sessionId,
+        mcpServerCommand: mcpServer.command,
+        mcpServerArgs: mcpServer.args,
+        containerInput,
+        sdkEnv,
+        resumeAt,
+      });
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }

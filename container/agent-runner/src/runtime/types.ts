@@ -12,6 +12,7 @@ export interface ContainerInput {
     codexHome: string;
     additionalDirectories: string[];
     writableRoots: string[];
+    sharedInstructionFiles: string[];
   };
   secrets?: Record<string, string>;
 }
@@ -27,7 +28,8 @@ export interface RunQueryInput {
   prompt: string;
   sessionId?: string;
   resumeAt?: string;
-  mcpServerPath: string;
+  mcpServerCommand: string;
+  mcpServerArgs: string[];
   containerInput: ContainerInput;
   sdkEnv: Record<string, string | undefined>;
 }

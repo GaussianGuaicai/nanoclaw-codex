@@ -10,6 +10,11 @@ import { emitStatus } from './status.js';
 
 export async function run(args: string[]): Promise<void> {
   const projectRoot = process.cwd();
+  const ensureWorkerDeps = path.join(
+    projectRoot,
+    'scripts',
+    'ensure-agent-runner-deps.mjs',
+  );
   const workerEntry = path.join(
     projectRoot,
     'container',
@@ -22,6 +27,10 @@ export async function run(args: string[]): Promise<void> {
   let buildOk = false;
   logger.info({ args }, 'Building local worker');
   try {
+    execSync(`node "${ensureWorkerDeps}"`, {
+      cwd: projectRoot,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     execSync('npm run build', {
       cwd: path.join(projectRoot, 'container', 'agent-runner'),
       stdio: ['ignore', 'pipe', 'pipe'],

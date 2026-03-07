@@ -94,6 +94,25 @@ function getCodexProcessEnv(
   return env;
 }
 
+function loadSharedInstructions(files: string[]): string | undefined {
+  const sections: string[] = [];
+  const seen = new Set<string>();
+
+  for (const file of files) {
+    const resolved = path.resolve(file);
+    if (seen.has(resolved) || !fs.existsSync(resolved)) continue;
+    seen.add(resolved);
+
+    const content = fs.readFileSync(resolved, 'utf-8').trim();
+    if (!content) continue;
+
+    const label = path.relative(process.cwd(), resolved) || resolved;
+    sections.push(`# Shared instructions from ${label}\n${content}`);
+  }
+
+  return sections.length > 0 ? sections.join('\n\n') : undefined;
+}
+
 function getCodexOptions(input: RunQueryInput): CodexOptions {
   const { sdkEnv, containerInput } = input;
   const runtimePaths = containerInput.runtimePaths;
@@ -116,6 +135,9 @@ function getCodexOptions(input: RunQueryInput): CodexOptions {
           })
           .map((entry) => ({ path: entry, enabled: true }))
       : [];
+  const sharedInstructions = loadSharedInstructions(
+    runtimePaths.sharedInstructionFiles,
+  );
 
   return {
     ...(sdkEnv.OPENAI_API_KEY ? { apiKey: sdkEnv.OPENAI_API_KEY } : {}),
@@ -124,8 +146,8 @@ function getCodexOptions(input: RunQueryInput): CodexOptions {
     config: {
       mcp_servers: {
         nanoclaw: {
-          command: 'node',
-          args: [input.mcpServerPath],
+          command: input.mcpServerCommand,
+          args: input.mcpServerArgs,
           env: {
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
@@ -143,6 +165,11 @@ function getCodexOptions(input: RunQueryInput): CodexOptions {
             skills: {
               config: skillConfigs,
             },
+          }
+        : {}),
+      ...(sharedInstructions
+        ? {
+            developer_instructions: sharedInstructions,
           }
         : {}),
     },

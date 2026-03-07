@@ -144,7 +144,12 @@ describe('container-runner worker execution', () => {
         readonly: false,
       },
     ] as any);
-    mockExistingPaths(['/tmp/nanoclaw-test-groups/global']);
+    mockExistingPaths([
+      '/tmp/nanoclaw-test-groups/global',
+      '/tmp/nanoclaw-test-data/sessions/test-group/sandbox-context/global/AGENTS.md',
+      '/tmp/nanoclaw-test-data/sessions/test-group/sandbox-context/extra/docs/AGENTS.md',
+      '/allowed/repo/AGENTS.md',
+    ]);
 
     const layout = buildAgentExecutionLayout(
       {
@@ -169,6 +174,13 @@ describe('container-runner worker execution', () => {
     expect(layout.additionalDirectories).toContain(process.cwd());
     expect(layout.additionalDirectories).toContain(
       '/tmp/nanoclaw-test-data/sessions/test-group/sandbox-context',
+    );
+    expect(layout.sharedInstructionFiles).toEqual(
+      expect.arrayContaining([
+        '/tmp/nanoclaw-test-data/sessions/test-group/sandbox-context/global/AGENTS.md',
+        '/tmp/nanoclaw-test-data/sessions/test-group/sandbox-context/extra/docs/AGENTS.md',
+        '/allowed/repo/AGENTS.md',
+      ]),
     );
     expect(layout.snapshotMappings).toEqual(
       expect.arrayContaining([

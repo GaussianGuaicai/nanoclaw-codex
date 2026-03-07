@@ -5,7 +5,8 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc && npm --prefix container/agent-runner run build",
+    "build": "tsc && npm run build:worker",
+    "build:worker": "node scripts/ensure-agent-runner-deps.mjs && npm --prefix container/agent-runner run build",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",

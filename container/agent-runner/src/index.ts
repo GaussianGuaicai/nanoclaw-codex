@@ -325,7 +325,7 @@ async function main(): Promise<void> {
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
   // Migration mapping: docs/migration/anthropic-to-codex-mapping.md
-  const provider = getAgentProvider(process.env);
+  const provider = getAgentProvider(sdkEnv);
   log(`Using agent runtime provider: ${provider}`);
   const runtime = createAgentRuntime(
     provider,

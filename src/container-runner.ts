@@ -130,7 +130,7 @@ function buildVolumeMounts(
             // Enable agent swarms (subagent orchestration)
             // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
             CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-            // Load CLAUDE.md from additional mounted directories
+            // Load AGENTS.md from additional mounted directories
             // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
             CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
             // Enable Claude's memory feature (persists user preferences between sessions)
@@ -158,6 +158,20 @@ function buildVolumeMounts(
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
+    readonly: false,
+  });
+
+  // Per-group Codex credentials/config directory for ChatGPT login auth
+  const groupCodexDir = path.join(
+    DATA_DIR,
+    'sessions',
+    group.folder,
+    '.codex',
+  );
+  fs.mkdirSync(groupCodexDir, { recursive: true });
+  mounts.push({
+    hostPath: groupCodexDir,
+    containerPath: '/home/node/.codex',
     readonly: false,
   });
 
@@ -220,6 +234,16 @@ function readSecrets(): Record<string, string> {
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_BASE_URL',
     'ANTHROPIC_AUTH_TOKEN',
+    'OPENAI_API_KEY',
+    'OPENAI_BASE_URL',
+    'NANOCLAW_AGENT_PROVIDER',
+    'NANOCLAW_CODEX_MODEL',
+    'NANOCLAW_CODEX_SANDBOX_MODE',
+    'NANOCLAW_CODEX_APPROVAL_POLICY',
+    'NANOCLAW_CODEX_NETWORK_ACCESS',
+    'NANOCLAW_CODEX_WEB_SEARCH_ENABLED',
+    'NANOCLAW_CODEX_WEB_SEARCH_MODE',
+    'NANOCLAW_CODEX_REASONING_EFFORT',
   ]);
 }
 

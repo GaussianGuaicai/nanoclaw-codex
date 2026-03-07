@@ -55,19 +55,31 @@ describe('ensureContainerRuntimeRunning', () => {
     ensureContainerRuntimeRunning();
 
     expect(mockExecSync).toHaveBeenCalledTimes(1);
-    expect(mockExecSync).toHaveBeenCalledWith(`${CONTAINER_RUNTIME_BIN} info`, {
-      stdio: 'pipe',
-      timeout: 10000,
-    });
+    if (CONTAINER_RUNTIME_BIN === 'docker') {
+      expect(mockExecSync).toHaveBeenCalledWith('docker info', {
+        stdio: 'pipe',
+        timeout: 10000,
+      });
+    } else {
+      expect(mockExecSync).toHaveBeenCalledWith('container system status', {
+        stdio: 'pipe',
+        timeout: 10000,
+      });
+    }
     expect(logger.debug).toHaveBeenCalledWith(
       'Container runtime already running',
     );
   });
 
-  it('throws when docker info fails', () => {
+  it('throws when runtime checks fail', () => {
     mockExecSync.mockImplementationOnce(() => {
-      throw new Error('Cannot connect to the Docker daemon');
+      throw new Error('runtime unavailable');
     });
+    if (CONTAINER_RUNTIME_BIN === 'container') {
+      mockExecSync.mockImplementationOnce(() => {
+        throw new Error('failed to start container system');
+      });
+    }
 
     expect(() => ensureContainerRuntimeRunning()).toThrow(
       'Container runtime is required but failed to start',
@@ -80,9 +92,13 @@ describe('ensureContainerRuntimeRunning', () => {
 
 describe('cleanupOrphans', () => {
   it('stops orphaned nanoclaw containers', () => {
-    // docker ps returns container names, one per line
     mockExecSync.mockReturnValueOnce(
-      'nanoclaw-group1-111\nnanoclaw-group2-222\n',
+      CONTAINER_RUNTIME_BIN === 'docker'
+        ? 'nanoclaw-group1-111\nnanoclaw-group2-222\n'
+        : JSON.stringify([
+            { name: 'nanoclaw-group1-111' },
+            { name: 'nanoclaw-group2-222' },
+          ]),
     );
     // stop calls succeed
     mockExecSync.mockReturnValue('');
@@ -108,7 +124,9 @@ describe('cleanupOrphans', () => {
   });
 
   it('does nothing when no orphans exist', () => {
-    mockExecSync.mockReturnValueOnce('');
+    mockExecSync.mockReturnValueOnce(
+      CONTAINER_RUNTIME_BIN === 'docker' ? '' : '[]',
+    );
 
     cleanupOrphans();
 
@@ -130,7 +148,11 @@ describe('cleanupOrphans', () => {
   });
 
   it('continues stopping remaining containers when one stop fails', () => {
-    mockExecSync.mockReturnValueOnce('nanoclaw-a-1\nnanoclaw-b-2\n');
+    mockExecSync.mockReturnValueOnce(
+      CONTAINER_RUNTIME_BIN === 'docker'
+        ? 'nanoclaw-a-1\nnanoclaw-b-2\n'
+        : JSON.stringify([{ name: 'nanoclaw-a-1' }, { name: 'nanoclaw-b-2' }]),
+    );
     // First stop fails
     mockExecSync.mockImplementationOnce(() => {
       throw new Error('already stopped');

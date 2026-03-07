@@ -62,3 +62,7 @@ systemctl --user restart nanoclaw
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
+
+## Apple Container Note
+
+Apple Container currently has an upstream bug where `container run` / `container build` can fail with `VZErrorDomain Code=1` ("The virtual machine failed to start"). Track: [apple/container#1254](https://github.com/apple/container/issues/1254).

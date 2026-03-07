@@ -33,12 +33,18 @@ This fork keeps NanoClaw's small-core, skill-first host architecture, but replac
 ```bash
 git clone https://github.com/GaussianGuaicai/nanoclaw-codex.git
 cd nanoclaw-codex
-claude
+brew install codex
+# or: npm install -g @openai/codex
+mkdir -p .agents
+ln -s ../.claude/skills .agents/skills
+codex
 ```
 
-Then run `/setup`.
+Then run `$setup`.
 
-The setup flow is still skill-driven. It installs dependencies, configures channels, and writes service configuration. Commands prefixed with `/` are Claude Code skills, so run them inside the `claude` CLI prompt rather than in your shell.
+The setup flow is still skill-driven. It installs dependencies, configures channels, and writes service configuration.
+
+> **Note:** In Codex, invoke repo skills with a `$` prefix, such as `$setup`, `$add-whatsapp`, and `$customize`. Codex scans `.agents/skills`, while this repository still stores its skill packages in `.claude/skills`, so you currently need the `.agents/skills -> ../.claude/skills` symlink shown above. Codex supports symlinked skill directories.
 
 ## Runtime
 
@@ -81,7 +87,7 @@ The runtime defaults to `workspace-write` sandbox mode with `approval_policy=nev
 - Per-group Codex session state via `data/sessions/*/.codex`
 - Scheduled tasks that run through the same local worker
 - File-based IPC between the host orchestrator and the worker MCP server
-- Skill-based channel installation (`/add-whatsapp`, `/add-telegram`, `/add-slack`, `/add-discord`, `/add-gmail`)
+- Skill-based channel installation (`$add-whatsapp`, `$add-telegram`, `$add-slack`, `$add-discord`, `$add-gmail`)
 
 The core intentionally does not bundle channel implementations. Channels are added by skills that patch `src/channels/` and self-register at startup.
 
@@ -89,7 +95,7 @@ The core intentionally does not bundle channel implementations. Channels are add
 
 - macOS or Linux
 - Node.js 20+
-- [Claude Code](https://claude.ai/download) for `/setup`, `/customize`, and the existing skill workflow
+- [Codex CLI](https://developers.openai.com/codex/quickstart/) for `$setup`, `$customize`, and the host-side skill workflow
 - `OPENAI_API_KEY` for Codex runtime access
 
 Docker and Apple Container are no longer required.
@@ -144,7 +150,7 @@ See [docs/SECURITY.md](docs/SECURITY.md) for the current model.
 
 **Do I still need Claude Code if runtime is Codex?**
 
-Yes, for the current setup and customization workflow. The runtime changed; the host-side skill workflow did not.
+No. The recommended host workflow is now Codex: install the Codex CLI, create the `.agents/skills` symlink, open the repo with `codex`, and run repo skills with `$setup`, `$customize`, and the other `$skill-name` commands.
 
 **Can I use self-hosted OpenAI-compatible endpoints?**
 
@@ -167,7 +173,7 @@ Inspect `groups/*/logs/`, scheduler state, IPC snapshots under `data/ipc/`, and 
 
 **Prefer skills over core bloat.**
 
-If you want to add Telegram support or another integration, contribute the skill that teaches the coding agent how to patch NanoClaw, rather than permanently growing core.
+If you want to add Telegram support or another integration, contribute the skill that teaches the coding agent how to patch NanoClaw, rather than permanently growing core. At the moment, repo skills still live under `.claude/skills`, so keep the `.agents/skills` symlink requirement in mind when documenting or testing them with Codex.
 
 ## Community
 

@@ -6,6 +6,10 @@ Personal AI assistant. See [README.md](README.md) for philosophy and setup. See 
 
 Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to Anthropic Agent SDK / Codex runtime running in containers (Linux VMs). Each group has isolated filesystem and memory.
 
+## Working Preferences
+
+- Prefer Chinese for user-facing collaboration unless the requested artifact should stay in another language.
+
 ## Key Files
 
 | File | Purpose |
@@ -57,7 +61,7 @@ systemctl --user restart nanoclaw
 
 ## Troubleshooting
 
-**WhatsApp not connecting after upgrade:** WhatsApp is now a separate skill, not bundled in core. Run `/add-whatsapp` (or `npx tsx scripts/apply-skill.ts .agents/skills/add-whatsapp && npm run build`) to install it. Existing auth credentials and groups are preserved.
+**WhatsApp not connecting after upgrade:** WhatsApp is now a separate skill, not bundled in core. Run `/add-whatsapp` (or `npx tsx scripts/apply-skill.ts .claude/skills/add-whatsapp && npm run build`) to install it. Existing auth credentials and groups are preserved.
 
 ## Container Build Cache
 

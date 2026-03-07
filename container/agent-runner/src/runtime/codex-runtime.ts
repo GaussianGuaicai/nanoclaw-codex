@@ -82,7 +82,7 @@ function getCodexOptions(input: RunQueryInput): CodexOptions {
   const { sdkEnv, containerInput } = input;
 
   return {
-    apiKey: sdkEnv.OPENAI_API_KEY,
+    ...(sdkEnv.OPENAI_API_KEY ? { apiKey: sdkEnv.OPENAI_API_KEY } : {}),
     baseUrl: sdkEnv.OPENAI_BASE_URL,
     env: getCodexProcessEnv(sdkEnv),
     config: {
@@ -157,10 +157,10 @@ export class CodexRuntime implements AgentRuntime {
       );
     }
 
-    if (!input.sdkEnv.OPENAI_API_KEY) {
-      throw new Error(
-        'OPENAI_API_KEY is required when NANOCLAW_AGENT_PROVIDER=codex',
-      );
+    if (input.sdkEnv.OPENAI_API_KEY) {
+      this.hooks.onLog('Codex runtime auth mode: OPENAI_API_KEY');
+    } else {
+      this.hooks.onLog('Codex runtime auth mode: ChatGPT login credentials (~/.codex)');
     }
 
     const codex = new Codex(getCodexOptions(input));

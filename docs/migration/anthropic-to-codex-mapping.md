@@ -58,6 +58,10 @@ Notes:
 
 - Container secret allowlist now includes `OPENAI_API_KEY`.
 - Bash sanitization hook now unsets `OPENAI_API_KEY` in addition to Anthropic auth vars.
+- Codex runtime now supports both auth modes:
+  - API key (`OPENAI_API_KEY`)
+  - ChatGPT login credentials from `~/.codex`
+- Container runtime now mounts per-group `.codex` to `/home/node/.codex`.
 - Status: ✅
 
 

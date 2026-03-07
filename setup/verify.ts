@@ -82,26 +82,22 @@ export async function run(_args: string[]): Promise<void> {
   }
   logger.info({ service }, 'Service status');
 
-  // 2. Check container runtime
-  let containerRuntime = 'none';
-  try {
-    execSync('command -v container', { stdio: 'ignore' });
-    containerRuntime = 'apple-container';
-  } catch {
-    try {
-      execSync('docker info', { stdio: 'ignore' });
-      containerRuntime = 'docker';
-    } catch {
-      // No runtime
-    }
-  }
+  // 2. Check local worker runtime
+  const workerEntry = path.join(
+    projectRoot,
+    'container',
+    'agent-runner',
+    'dist',
+    'index.js',
+  );
+  const workerRuntime = fs.existsSync(workerEntry) ? 'built' : 'source-only';
 
   // 3. Check credentials
   let credentials = 'missing';
   const envFile = path.join(projectRoot, '.env');
   if (fs.existsSync(envFile)) {
     const envContent = fs.readFileSync(envFile, 'utf-8');
-    if (/^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)=/m.test(envContent)) {
+    if (/^OPENAI_API_KEY=/m.test(envContent)) {
       credentials = 'configured';
     }
   }
@@ -178,7 +174,8 @@ export async function run(_args: string[]): Promise<void> {
 
   emitStatus('VERIFY', {
     SERVICE: service,
-    CONTAINER_RUNTIME: containerRuntime,
+    AGENT_RUNTIME: workerRuntime,
+    CONTAINER_RUNTIME: 'deprecated-local-worker',
     CREDENTIALS: credentials,
     CONFIGURED_CHANNELS: configuredChannels.join(','),
     CHANNEL_AUTH: JSON.stringify(channelAuth),

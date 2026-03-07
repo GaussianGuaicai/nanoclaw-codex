@@ -1,24 +1,14 @@
-#!/usr/bin/env tsx
-import { execFileSync, execSync } from 'child_process';
+#!/usr/bin/env -S node --import tsx
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
 import { compareSemver } from '../skills-engine/state.js';
 
-// Resolve tsx binary once to avoid npx race conditions across migrations
-function resolveTsx(): string {
-  // Check local node_modules first
-  const local = path.resolve('node_modules/.bin/tsx');
-  if (fs.existsSync(local)) return local;
-  // Fall back to whichever tsx is in PATH
-  try {
-    return execSync('which tsx', { encoding: 'utf-8' }).trim();
-  } catch {
-    return 'npx'; // last resort
-  }
-}
-
-const tsxBin = resolveTsx();
+const tsxLoaderPath = fileURLToPath(
+  new URL('../node_modules/tsx/dist/loader.mjs', import.meta.url),
+);
 
 const fromVersion = process.argv[2];
 const toVersion = process.argv[3];
@@ -26,7 +16,7 @@ const newCorePath = process.argv[4];
 
 if (!fromVersion || !toVersion || !newCorePath) {
   console.error(
-    'Usage: tsx scripts/run-migrations.ts <from-version> <to-version> <new-core-path>',
+    'Usage: node --import tsx scripts/run-migrations.ts <from-version> <to-version> <new-core-path>',
   );
   process.exit(1);
 }
@@ -72,14 +62,15 @@ for (const version of migrationVersions) {
   }
 
   try {
-    const tsxArgs = tsxBin.endsWith('npx')
-      ? ['tsx', migrationIndex, projectRoot]
-      : [migrationIndex, projectRoot];
-    execFileSync(tsxBin, tsxArgs, {
-      stdio: 'pipe',
-      cwd: projectRoot,
-      timeout: 120_000,
-    });
+    execFileSync(
+      process.execPath,
+      ['--import', tsxLoaderPath, migrationIndex, projectRoot],
+      {
+        stdio: 'pipe',
+        cwd: projectRoot,
+        timeout: 120_000,
+      },
+    );
     results.push({ version, success: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

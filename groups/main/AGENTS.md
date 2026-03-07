@@ -59,19 +59,15 @@ Keep messages clean and readable for WhatsApp.
 
 This is the **main channel**, which has elevated privileges.
 
-## Container Mounts
+## Runtime Paths
 
-Main has read-only access to the project and read-write access to its group folder:
+Main runs in `groups/main/` and also has direct writable access to the repo root.
 
-| Container Path | Host Path | Access |
-|----------------|-----------|--------|
-| `/workspace/project` | Project root | read-only |
-| `/workspace/group` | `groups/main/` | read-write |
-
-Key paths inside the container:
-- `/workspace/project/store/messages.db` - SQLite database
-- `/workspace/project/store/messages.db` (registered_groups table) - Group config
-- `/workspace/project/groups/` - All group folders
+Key paths from the main group runtime:
+- `../../store/messages.db` - SQLite database
+- `../../groups/` - All group folders
+- `../../data/ipc/main/available_groups.json` - Available groups snapshot
+- `../../data/ipc/main/current_tasks.json` - Task snapshot
 
 ---
 
@@ -79,7 +75,7 @@ Key paths inside the container:
 
 ### Finding Available Groups
 
-Available groups are provided in `/workspace/ipc/available_groups.json`:
+Available groups are provided in `../../data/ipc/main/available_groups.json`:
 
 ```json
 {
@@ -100,7 +96,7 @@ Groups are ordered by most recent activity. The list is synced from WhatsApp dai
 If a group the user mentions isn't in the list, request a fresh sync:
 
 ```bash
-echo '{"type": "refresh_groups"}' > /workspace/ipc/tasks/refresh_$(date +%s).json
+echo '{"type": "refresh_groups"}' > ../../data/ipc/main/tasks/refresh_$(date +%s).json
 ```
 
 Then wait a moment and re-read `available_groups.json`.
@@ -108,7 +104,7 @@ Then wait a moment and re-read `available_groups.json`.
 **Fallback**: Query the SQLite database directly:
 
 ```bash
-sqlite3 /workspace/project/store/messages.db "
+sqlite3 ../../store/messages.db "
   SELECT jid, name, last_message_time
   FROM chats
   WHERE jid LIKE '%@g.us' AND jid != '__group_sync__'
@@ -152,7 +148,7 @@ Fields:
 1. Query the database to find the group's JID
 2. Use the `register_group` MCP tool with the JID, name, folder, and trigger
 3. Optionally include `containerConfig` for additional mounts
-4. The group folder is created automatically: `/workspace/project/groups/{folder-name}/`
+4. The group folder is created automatically under `groups/{folder-name}/`
 5. Optionally create an initial `AGENTS.md` for the group
 
 Folder naming convention — channel prefix with underscore separator:
@@ -164,7 +160,11 @@ Folder naming convention — channel prefix with underscore separator:
 
 #### Adding Additional Directories for a Group
 
-Groups can have extra directories mounted. Add `containerConfig` to their entry:
+Groups can still use `containerConfig` for extra paths. The host now interprets it as:
+- `readonly !== false`: copy a snapshot into the group's sandbox context
+- `readonly === false`: add a writable root if the external allowlist permits it
+
+Example:
 
 ```json
 {
@@ -186,7 +186,7 @@ Groups can have extra directories mounted. Add `containerConfig` to their entry:
 }
 ```
 
-The directory will appear at `/workspace/extra/webapp` in that group's container.
+The directory is no longer mounted at a fixed `/workspace/extra/...` path. Read-only paths are copied into the group's sandbox context before each run, and writable paths become extra writable roots.
 
 #### Sender Allowlist
 
@@ -217,30 +217,30 @@ If the user wants to set up an allowlist, edit `~/.config/nanoclaw/sender-allowl
 Notes:
 - Your own messages (`is_from_me`) explicitly bypass the allowlist in trigger checks. Bot messages are filtered out by the database query before trigger evaluation, so they never reach the allowlist.
 - If the config file doesn't exist or is invalid, all senders are allowed (fail-open)
-- The config file is on the host at `~/.config/nanoclaw/sender-allowlist.json`, not inside the container
+- The config file is on the host at `~/.config/nanoclaw/sender-allowlist.json`
 
 ### Removing a Group
 
-1. Read `/workspace/project/data/registered_groups.json`
-2. Remove the entry for that group
-3. Write the updated JSON back
+1. Query `../../store/messages.db`
+2. Remove the row from the `registered_groups` table for that chat JID
+3. Keep the group folder unless the user explicitly asks to remove it
 4. The group folder and its files remain (don't delete them)
 
 ### Listing Groups
 
-Read `/workspace/project/data/registered_groups.json` and format it nicely.
+Read the `registered_groups` table from `../../store/messages.db` and format it nicely.
 
 ---
 
 ## Global Memory
 
-You can read and write to `/workspace/project/groups/global/AGENTS.md` for facts that should apply to all groups. Only update global memory when explicitly asked to "remember this globally" or similar.
+You can read and write to `../global/AGENTS.md` for facts that should apply to all groups. Only update global memory when explicitly asked to "remember this globally" or similar.
 
 ---
 
 ## Scheduling for Other Groups
 
-When scheduling tasks for other groups, use the `target_group_jid` parameter with the group's JID from `registered_groups.json`:
+When scheduling tasks for other groups, use the `target_group_jid` parameter with the group's JID from the `registered_groups` table:
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.

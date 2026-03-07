@@ -5,7 +5,7 @@ import { GroupQueue } from './group-queue.js';
 // Mock config to control concurrency limit
 vi.mock('./config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-test-data',
-  MAX_CONCURRENT_CONTAINERS: 2,
+  MAX_CONCURRENT_AGENTS: 2,
 }));
 
 // Mock fs operations used by sendMessage/closeStdin
@@ -36,7 +36,7 @@ describe('GroupQueue', () => {
 
   // --- Single group at a time ---
 
-  it('only runs one container per group at a time', async () => {
+  it('only runs one worker per group at a time', async () => {
     let concurrentCount = 0;
     let maxConcurrent = 0;
 
@@ -87,7 +87,7 @@ describe('GroupQueue', () => {
     // Let promises settle
     await vi.advanceTimersByTimeAsync(10);
 
-    // Only 2 should be active (MAX_CONCURRENT_CONTAINERS = 2)
+    // Only 2 should be active (MAX_CONCURRENT_AGENTS = 2)
     expect(maxActive).toBe(2);
     expect(activeCount).toBe(2);
 
@@ -280,7 +280,7 @@ describe('GroupQueue', () => {
 
   // --- Idle preemption ---
 
-  it('does NOT preempt active container when not idle', async () => {
+  it('does NOT preempt active worker when not idle', async () => {
     const fs = await import('fs');
     let resolveProcess: () => void;
 
@@ -298,18 +298,13 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     // Register a process so closeStdin has a groupFolder
-    queue.registerProcess(
-      'group1@g.us',
-      {} as any,
-      'container-1',
-      'test-group',
-    );
+    queue.registerProcess('group1@g.us', {} as any, 'worker-1', 'test-group');
 
-    // Enqueue a task while container is active but NOT idle
+    // Enqueue a task while the worker is active but NOT idle
     const taskFn = vi.fn(async () => {});
     queue.enqueueTask('group1@g.us', 'task-1', taskFn);
 
-    // _close should NOT have been written (container is working, not idle)
+    // _close should NOT have been written (worker is working, not idle)
     const writeFileSync = vi.mocked(fs.default.writeFileSync);
     const closeWrites = writeFileSync.mock.calls.filter(
       (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
@@ -320,7 +315,7 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
-  it('preempts idle container when task is enqueued', async () => {
+  it('preempts idle worker when task is enqueued', async () => {
     const fs = await import('fs');
     let resolveProcess: () => void;
 
@@ -338,12 +333,7 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     // Register process and mark idle
-    queue.registerProcess(
-      'group1@g.us',
-      {} as any,
-      'container-1',
-      'test-group',
-    );
+    queue.registerProcess('group1@g.us', {} as any, 'worker-1', 'test-group');
     queue.notifyIdle('group1@g.us');
 
     // Clear previous writes, then enqueue a task
@@ -353,7 +343,7 @@ describe('GroupQueue', () => {
     const taskFn = vi.fn(async () => {});
     queue.enqueueTask('group1@g.us', 'task-1', taskFn);
 
-    // _close SHOULD have been written (container is idle)
+    // _close SHOULD have been written (worker is idle)
     const closeWrites = writeFileSync.mock.calls.filter(
       (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
     );
@@ -377,14 +367,9 @@ describe('GroupQueue', () => {
     queue.setProcessMessagesFn(processMessages);
     queue.enqueueMessageCheck('group1@g.us');
     await vi.advanceTimersByTimeAsync(10);
-    queue.registerProcess(
-      'group1@g.us',
-      {} as any,
-      'container-1',
-      'test-group',
-    );
+    queue.registerProcess('group1@g.us', {} as any, 'worker-1', 'test-group');
 
-    // Container becomes idle
+    // Worker becomes idle
     queue.notifyIdle('group1@g.us');
 
     // A new user message arrives — resets idleWaiting
@@ -406,7 +391,7 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
-  it('sendMessage returns false for task containers so user messages queue up', async () => {
+  it('sendMessage returns false for task workers so user messages queue up', async () => {
     let resolveTask: () => void;
 
     const taskFn = vi.fn(async () => {
@@ -415,17 +400,12 @@ describe('GroupQueue', () => {
       });
     });
 
-    // Start a task (sets isTaskContainer = true)
+    // Start a task (sets isTaskWorker = true)
     queue.enqueueTask('group1@g.us', 'task-1', taskFn);
     await vi.advanceTimersByTimeAsync(10);
-    queue.registerProcess(
-      'group1@g.us',
-      {} as any,
-      'container-1',
-      'test-group',
-    );
+    queue.registerProcess('group1@g.us', {} as any, 'worker-1', 'test-group');
 
-    // sendMessage should return false — user messages must not go to task containers
+    // sendMessage should return false — user messages must not go to task workers
     const result = queue.sendMessage('group1@g.us', 'hello');
     expect(result).toBe(false);
 
@@ -451,12 +431,7 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     // Register process and enqueue a task (no idle yet — no preemption)
-    queue.registerProcess(
-      'group1@g.us',
-      {} as any,
-      'container-1',
-      'test-group',
-    );
+    queue.registerProcess('group1@g.us', {} as any, 'worker-1', 'test-group');
 
     const writeFileSync = vi.mocked(fs.default.writeFileSync);
     writeFileSync.mockClear();
@@ -469,7 +444,7 @@ describe('GroupQueue', () => {
     );
     expect(closeWrites).toHaveLength(0);
 
-    // Now container becomes idle — should preempt because task is pending
+    // Now the worker becomes idle — should preempt because a task is pending
     writeFileSync.mockClear();
     queue.notifyIdle('group1@g.us');
 

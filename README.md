@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  A personal AI assistant that runs agents in isolated containers. This fork keeps NanoClaw's small-core, skill-first architecture and adds OpenAI Codex as an alternative runtime alongside Anthropic.
+  A personal AI assistant that runs Codex in per-group local sandboxes.
 </p>
 
 <p align="center">
@@ -14,20 +14,19 @@
   <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="34.9k tokens, 17% of context window" valign="middle"></a>
 </p>
 
-This repository tracks [upstream NanoClaw](https://github.com/qwibitai/nanoclaw) and keeps its original operating model: one small Node.js orchestrator, channels added through skills, per-group memory, and real container isolation instead of application-only permission checks. The main difference in this fork is the runtime inside each group container: you can keep using Anthropic/Claude, or switch to Codex.
+This fork keeps NanoClaw's small-core, skill-first host architecture, but replaces the old container runtime with a local Codex sandbox worker. The host process still handles channels, routing, scheduling, group state, and IPC. Codex now runs directly on the host with per-group `CODEX_HOME`, group-scoped workspaces, and host-prepared writable roots or snapshots.
 
 ## What This Fork Changes
 
-- Adds provider switching with `NANOCLAW_AGENT_PROVIDER=anthropic|codex`
-- Keeps Anthropic runtime support via `@anthropic-ai/claude-agent-sdk`
-- Adds Codex runtime support via `@openai/codex-sdk`
-- Passes through `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `NANOCLAW_CODEX_*` controls into the container runtime
-- Mounts a per-group `.codex` directory alongside the existing per-group `.claude` directory
-- Preserves upstream's skill-based customization, scheduler, IPC, and security model
+- Removes Anthropic runtime support and standardizes on Codex
+- Replaces container lifecycle management with a local worker process using `@openai/codex-sdk`
+- Keeps per-group session state in `data/sessions/{group}/.codex`
+- Preserves task scheduling, IPC tools, and skill-based channel installation
+- Keeps `containerConfig` as a compatibility input, but maps it to sandbox writable roots or read-only snapshots
 
 ## Why NanoClaw
 
-[OpenClaw](https://github.com/openclaw/openclaw) is an impressive project, but I did not want to hand broad access to a large codebase I could not realistically audit. NanoClaw keeps the same core idea in a codebase small enough to understand: one process, a small number of files, and agents that run inside real Linux containers with explicit mounts.
+[OpenClaw](https://github.com/openclaw/openclaw) is an impressive project, but I wanted a codebase small enough to audit and fork directly. NanoClaw keeps the core loop understandable: one Node.js process, a few source files, and explicit host-side control over what each group can see.
 
 ## Quick Start
 
@@ -39,121 +38,61 @@ claude
 
 Then run `/setup`.
 
-The setup flow is still Claude Code skill-driven. It bootstraps dependencies, configures Docker or Apple Container, installs channel skills, and writes the service configuration for you.
+The setup flow is still skill-driven. It installs dependencies, configures channels, and writes service configuration. Commands prefixed with `/` are Claude Code skills, so run them inside the `claude` CLI prompt rather than in your shell.
 
-> **Note:** Commands prefixed with `/` (like `/setup`, `/add-whatsapp`, `/customize`) are [Claude Code skills](https://code.claude.com/docs/en/skills). Run them inside the `claude` CLI prompt, not in your regular shell.
+## Runtime
 
-If you want to debug setup outside the skill, the underlying steps live in `setup/` and are invoked with `bash setup.sh` plus `npx tsx setup/index.ts --step ...`.
+NanoClaw is now Codex-only.
 
-## Choose The Agent Runtime
-
-| Runtime | Setting | Auth | Notes |
-|---------|---------|------|-------|
-| Anthropic | `NANOCLAW_AGENT_PROVIDER=anthropic` or unset | `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` | Most mature path; matches upstream behavior most closely |
-| Codex | `NANOCLAW_AGENT_PROVIDER=codex` | `OPENAI_API_KEY` | Uses `@openai/codex-sdk`; supports provider-specific controls via `NANOCLAW_CODEX_*` |
-
-Example `.env`:
+Required `.env` keys:
 
 ```bash
-# Anthropic / Claude (default)
-NANOCLAW_AGENT_PROVIDER=anthropic
-CLAUDE_CODE_OAUTH_TOKEN=...
-
-# Or switch the in-container runtime to Codex
-# NANOCLAW_AGENT_PROVIDER=codex
-# OPENAI_API_KEY=sk-...
-# OPENAI_BASE_URL=https://your-openai-compatible-endpoint.com
-# NANOCLAW_CODEX_MODEL=gpt-5-codex
-# NANOCLAW_CODEX_SANDBOX_MODE=workspace-write
-# NANOCLAW_CODEX_APPROVAL_POLICY=never
-# NANOCLAW_CODEX_NETWORK_ACCESS=false
-# NANOCLAW_CODEX_WEB_SEARCH_ENABLED=false
-# NANOCLAW_CODEX_WEB_SEARCH_MODE=disabled
-# NANOCLAW_CODEX_REASONING_EFFORT=medium
+OPENAI_API_KEY=sk-...
+# Optional
+OPENAI_BASE_URL=https://your-openai-compatible-endpoint.com
+NANOCLAW_CODEX_MODEL=gpt-5-codex
+NANOCLAW_CODEX_SANDBOX_MODE=workspace-write
+NANOCLAW_CODEX_APPROVAL_POLICY=never
+NANOCLAW_CODEX_NETWORK_ACCESS=true
+NANOCLAW_CODEX_WEB_SEARCH_ENABLED=false
+NANOCLAW_CODEX_WEB_SEARCH_MODE=disabled
+NANOCLAW_CODEX_REASONING_EFFORT=medium
 ```
 
-The Codex path also mounts a per-group `.codex` directory to `/home/node/.codex`. If you want to experiment with login-based auth, you can manage that directory yourself, but the straightforward documented path in this fork is `OPENAI_API_KEY`.
+Per-group Codex state lives under `data/sessions/{group}/.codex`. That directory is used as `CODEX_HOME`, so each group gets isolated session history, auth state, logs, and local Codex metadata.
 
-### Current Codex Status
+## Sandbox Model
 
-Codex support is functional, but it is not yet full Anthropic parity.
+- Main group:
+  - working directory: `groups/main/`
+  - read-only snapshot of project root (with `.env` stripped)
+- Non-main groups:
+  - working directory: their own `groups/{folder}/`
+  - no automatic access to project root
+- `containerConfig.additionalMounts` compatibility:
+  - `readonly !== false`: copied into a per-group snapshot directory before each run
+  - `readonly === false`: allowed only when the external mount allowlist permits it, then exposed as an extra writable root
 
-- The adapter lives in `container/agent-runner/src/runtime/codex-runtime.ts`
-- It currently runs one prompt to one final response per loop iteration
-- It resumes by thread ID, but currently ignores Anthropic's `resumeAt` cursor
-- Tool and hook parity are still being aligned
-
-For the current migration surface and open gaps, see [docs/migration/anthropic-to-codex-mapping.md](docs/migration/anthropic-to-codex-mapping.md).
-
-## Philosophy
-
-**Small enough to understand.** One process, a few source files, and no microservices.
-
-**Secure by isolation.** Agents run in Linux containers and only see explicitly mounted directories.
-
-**Built for the individual user.** The project is meant to be forked and changed, not configured into a giant generic platform.
-
-**Skills over built-ins.** Channels and optional integrations are added as skills so the core stays small.
-
-**AI-native operations.** Setup, debugging, and customization are intended to happen through the coding agent rather than admin dashboards.
+The runtime defaults to `workspace-write` sandbox mode with `approval_policy=never` and network enabled. This matches NanoClaw's unattended chat/task model: the host cannot pause for interactive sandbox approvals mid-turn.
 
 ## What The Core Ships With
 
-- Dual runtime support: Anthropic by default, Codex optionally
 - Group-isolated memory via `groups/*/AGENTS.md`
-- Per-group filesystem isolation and container mounts
-- Scheduled tasks that run inside the same isolated runtime
-- File-based IPC between the host orchestrator and the container
-- A skill system for installing channels and optional integrations
+- Per-group Codex session state via `data/sessions/*/.codex`
+- Scheduled tasks that run through the same local worker
+- File-based IPC between the host orchestrator and the worker MCP server
+- Skill-based channel installation (`/add-whatsapp`, `/add-telegram`, `/add-slack`, `/add-discord`, `/add-gmail`)
 
-The core intentionally does **not** bundle channel implementations. Channel code is added by skills that patch `src/channels/` and self-register at startup. This repo already includes official skills for:
-
-- `/add-whatsapp`
-- `/add-telegram`
-- `/add-slack`
-- `/add-discord`
-- `/add-gmail`
-
-## Usage
-
-Talk to your assistant with the trigger word (default: `@Andy`):
-
-```text
-@Andy send an overview of the sales pipeline every weekday morning at 9am (has access to my Obsidian vault folder)
-@Andy review the git history for the past week each Friday and update the README if there's drift
-@Andy every Monday at 8am, compile news on AI developments and message me a briefing
-```
-
-From the main channel (your self-chat), you can manage groups and tasks:
-
-```text
-@Andy list all scheduled tasks across groups
-@Andy pause the Monday briefing task
-@Andy join the Family Chat group
-```
-
-## Customizing
-
-NanoClaw favors code changes over sprawling configuration.
-
-Tell Claude Code what you want:
-
-- "Change the trigger word to @Bob"
-- "Remember that responses should be shorter and more direct"
-- "Add a custom greeting when I say good morning"
-- "Store conversation summaries weekly"
-
-Or run `/customize` for a guided flow.
+The core intentionally does not bundle channel implementations. Channels are added by skills that patch `src/channels/` and self-register at startup.
 
 ## Requirements
 
 - macOS or Linux
 - Node.js 20+
 - [Claude Code](https://claude.ai/download) for `/setup`, `/customize`, and the existing skill workflow
-- One auth path for your chosen runtime:
-  - Anthropic: `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`
-  - Codex: `OPENAI_API_KEY`
-- [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
+- `OPENAI_API_KEY` for Codex runtime access
+
+Docker and Apple Container are no longer required.
 
 ## Development
 
@@ -161,87 +100,74 @@ Or run `/customize` for a guided flow.
 npm run dev
 npm run build
 npm test
-./container/build.sh
 ```
+
+`npm run build` now compiles both the host TypeScript project and the local worker under `container/agent-runner/`.
 
 ## Architecture
 
 ```text
-Channels --> SQLite --> Polling loop --> Container runner --> Anthropic or Codex runtime --> Response
+Channels --> SQLite --> Polling loop --> Local worker runner --> Codex SDK --> Response
 ```
 
-Single Node.js process. Installed channels self-register at startup. The orchestrator connects whichever channels have credentials present, queues work per group, and spawns isolated agent containers. The container runner mounts only the directories allowed for that group, starts the provider-specific runtime, and exchanges messages/tasks through filesystem IPC.
+Single Node.js process. Installed channels self-register at startup. The orchestrator connects whichever channels have credentials present, queues work per group, prepares group-specific sandbox inputs, and spawns a local Codex worker process. The worker starts Codex with:
 
-For the baseline architecture, see [docs/SPEC.md](docs/SPEC.md). For Codex-specific runtime deltas, see [docs/migration/anthropic-to-codex-mapping.md](docs/migration/anthropic-to-codex-mapping.md).
+- a per-group `CODEX_HOME`
+- a group working directory
+- host-selected additional writable roots
+- a local MCP server for messaging and scheduling tools
 
 Key files:
 
 - `src/index.ts` - Orchestrator: state, message loop, agent invocation
-- `src/channels/registry.ts` - Channel registry and self-registration
-- `src/container-runner.ts` - Mounts, secret handoff, and container process management
+- `src/container-runner.ts` - Host-side worker launch, sandbox layout prep, stdout parsing
 - `src/ipc.ts` - IPC watcher and task processing
-- `src/router.ts` - Message formatting and outbound routing
-- `src/group-queue.ts` - Per-group queue with a global concurrency limit
 - `src/task-scheduler.ts` - Scheduled task execution
-- `src/db.ts` - SQLite operations (messages, groups, sessions, state)
-- `container/agent-runner/src/runtime/anthropic-runtime.ts` - Anthropic provider implementation
-- `container/agent-runner/src/runtime/codex-runtime.ts` - Codex provider implementation
+- `src/db.ts` - SQLite operations
+- `container/agent-runner/src/index.ts` - Local worker entrypoint
+- `container/agent-runner/src/runtime/codex-runtime.ts` - Codex runtime implementation
+- `container/agent-runner/src/ipc-mcp-stdio.ts` - MCP tools exposed to Codex
 - `groups/*/AGENTS.md` - Per-group memory
 
 ## Security
 
-The security model is the same as upstream NanoClaw: the primary boundary is container isolation, not prompt-level allowlists. The main group gets the project mounted read-only plus explicit writable mounts; non-main groups only get their own workspace plus the global memory directory read-only. External mounts are validated against an allowlist stored outside the project root.
+The main security boundary is now Codex sandbox policy plus host-side directory orchestration, not Linux VM/container isolation.
 
-See [docs/SECURITY.md](docs/SECURITY.md) for the baseline model and [docs/migration/anthropic-to-codex-mapping.md](docs/migration/anthropic-to-codex-mapping.md) for Codex-specific auth/runtime additions.
+- Main group can edit the repo root.
+- Non-main groups are limited to their own group directory plus any host-approved extra roots or snapshots.
+- Extra writable roots are validated against an external allowlist at `~/.config/nanoclaw/mount-allowlist.json`.
+- The host still owns channel auth, sender allowlists, scheduling state, and IPC authorization.
+
+See [docs/SECURITY.md](docs/SECURITY.md) for the current model.
 
 ## FAQ
 
-**Do I still need Claude Code if I want to run Codex inside NanoClaw?**
+**Do I still need Claude Code if runtime is Codex?**
 
-Yes, for the current setup and customization workflow. This fork changes the runtime inside the container, not the existing slash-skill based host workflow.
+Yes, for the current setup and customization workflow. The runtime changed; the host-side skill workflow did not.
 
-**Are channels bundled in core?**
+**Can I use self-hosted OpenAI-compatible endpoints?**
 
-No. The core channel barrel (`src/channels/index.ts`) is intentionally empty until a skill adds imports and channel files. This repository includes skills for the common channels, but you install them into your fork when you want them.
-
-**Can I run this on Linux?**
-
-Yes. Docker is the default runtime and works on macOS and Linux. Apple Container is available on macOS.
-
-**Can I use third-party or self-hosted model endpoints?**
-
-Yes.
-
-For Anthropic-compatible endpoints:
+Yes:
 
 ```bash
-ANTHROPIC_BASE_URL=https://your-api-endpoint.com
-ANTHROPIC_AUTH_TOKEN=your-token-here
-```
-
-For Codex-compatible endpoints:
-
-```bash
-NANOCLAW_AGENT_PROVIDER=codex
 OPENAI_BASE_URL=https://your-openai-compatible-endpoint.com
 OPENAI_API_KEY=your-token-here
 ```
 
-**Is this secure?**
+**Is this as isolated as the old container version?**
 
-It is designed around OS-level isolation. Agents run in containers and can only access explicitly mounted directories. You should still review what you run, but the main security boundary is the container, not an in-process permission filter.
+No. The old fork relied on container isolation. The current fork accepts a weaker but simpler model: Codex `workspace-write` sandbox plus host-controlled writable roots and snapshots.
 
 **How do I debug issues?**
 
-Ask the coding agent. The intended workflow remains AI-native: inspect logs, check the scheduler, review recent container output, and patch the code when needed.
+Inspect `groups/*/logs/`, scheduler state, IPC snapshots under `data/ipc/`, and the worker implementation under `container/agent-runner/`.
 
 ## Contributing
 
-**Don't add features. Add skills.**
+**Prefer skills over core bloat.**
 
-If you want to add Telegram support, don't create a PR that permanently grows the core. Instead, contribute a skill like `.claude/skills/add-telegram/` that teaches Claude Code how to transform a NanoClaw installation.
-
-That keeps the base system small while still letting each user compose the exact setup they want.
+If you want to add Telegram support or another integration, contribute the skill that teaches the coding agent how to patch NanoClaw, rather than permanently growing core.
 
 ## Community
 

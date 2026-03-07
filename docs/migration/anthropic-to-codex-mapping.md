@@ -1,105 +1,66 @@
-# Anthropic Agent SDK → Codex SDK Mapping
+# Container Runtime → Local Codex Sandbox Mapping
 
-This document records the migration surface from NanoClaw's current Anthropic runtime to Codex runtime support.
-
-## Status legend
-
-- ✅ implemented
-- ⚠️ partial (works, but behavior differs)
-- ❓ pending design/validation
+This document records the current runtime shape after removing the old container and Anthropic paths.
 
 ## Runtime invocation
 
-- Anthropic: `query({ prompt, options })` stream in `container/agent-runner/src/runtime/anthropic-runtime.ts`.
-- Codex: thread-based runtime in `container/agent-runner/src/runtime/codex-runtime.ts`.
-- Status: ⚠️
+- Old model: host spawned a container and the container selected Anthropic or Codex at runtime.
+- Current model: host spawns a local worker process that always runs Codex via `@openai/codex-sdk`.
 
-Notes:
-- `NANOCLAW_AGENT_PROVIDER=anthropic|codex` now selects runtime at startup.
-- Anthropic runtime streams intermediate events; Codex runtime currently runs one prompt/one result per loop iteration.
+Status: ✅ implemented
 
 ## Session continuity
 
-- Anthropic: `resume` + `resumeSessionAt` with last assistant UUID cursor.
-- Codex: uses thread resume via `resumeThread(sessionId)`.
-- Status: ⚠️
+- Session ID remains the Codex thread ID.
+- Per-group Codex state lives under `data/sessions/{group}/.codex` and is used as `CODEX_HOME`.
+- The runtime still ignores Anthropic-style `resumeAt` cursors because Codex resumes by thread ID only.
 
-Notes:
-- Codex runtime ignores `resumeAt` cursor for now (logged as informational).
-- `newSessionId` comes from thread id when available.
+Status: ✅ implemented
 
-## Hooks: compaction and tool sanitization
+## Sandbox and filesystem layout
 
-- Anthropic: `PreCompact` and `PreToolUse(Bash)` hooks are active.
-- Codex: partial compatibility implemented in runtime middleware (env sanitization and per-turn archive).
-- Status: ⚠️
+- Old model: explicit bind mounts into `/workspace/...` inside a container.
+- Current model:
+  - group folder becomes the working directory
+  - main group gets the repo root as an extra writable root
+  - read-only extra mounts are copied into a per-group snapshot directory
+  - read-write extra mounts become extra writable roots when the host allowlist permits them
 
-Notes:
-- Codex runtime sanitizes process environment before spawning Codex CLI.
-- Codex runtime writes lightweight conversation archives to `groups/*/conversations/` after each turn.
-
-## Tool and permissions configuration
-
-- Anthropic: explicit `allowedTools` + bypass permission mode.
-- Codex: uses Codex SDK defaults in current runtime implementation.
-- Status: ❓
+Status: ✅ implemented
 
 ## MCP server wiring
 
-- Anthropic: `mcpServers.nanoclaw` with `node ipc-mcp-stdio.js`.
-- Codex: runtime now injects `mcp_servers.nanoclaw` via Codex SDK config.
-- Status: ⚠️
+- The local worker still injects `mcp_servers.nanoclaw`.
+- `ipc-mcp-stdio.ts` now talks to host IPC paths directly instead of container paths.
 
-Notes:
-- Basic MCP bridge is implemented for Codex runtime.
-- Full parity for hook-mediated policies and tool filtering is still pending.
+Status: ✅ implemented
 
 ## Secrets and auth handoff
 
-- Container secret allowlist now includes `OPENAI_API_KEY`.
-- Bash sanitization hook now unsets `OPENAI_API_KEY` in addition to Anthropic auth vars.
-- Codex runtime now supports both auth modes:
-  - API key (`OPENAI_API_KEY`)
-  - ChatGPT login credentials from `~/.codex`
-- Container runtime now mounts per-group `.codex` to `/home/node/.codex`.
-- Status: ✅
-
-
-## Provider configuration handoff
-
-- Container secret pass-through now includes Codex runtime controls:
-  - `NANOCLAW_AGENT_PROVIDER`
-  - `NANOCLAW_CODEX_MODEL`
-  - `NANOCLAW_CODEX_SANDBOX_MODE`
-  - `NANOCLAW_CODEX_APPROVAL_POLICY`
-  - `NANOCLAW_CODEX_NETWORK_ACCESS`
-  - `NANOCLAW_CODEX_WEB_SEARCH_ENABLED`
-  - `NANOCLAW_CODEX_WEB_SEARCH_MODE`
-  - `NANOCLAW_CODEX_REASONING_EFFORT`
+- Runtime secrets now focus on OpenAI/Codex only:
+  - `OPENAI_API_KEY`
   - `OPENAI_BASE_URL`
-- Status: ✅
+  - `NANOCLAW_CODEX_*`
+- The worker uses a minimal process environment and a per-group `CODEX_HOME`.
 
-## Completed migration phases
+Status: ✅ implemented
 
-### Phase 1 (completed)
+## Skills
 
-1. Introduced runtime abstraction (`AgentRuntime`) and provider factory.
-2. Moved Anthropic-specific query implementation to `runtime/anthropic-runtime.ts`.
-3. Decoupled main loop in `index.ts` from Anthropic event schema.
+- Old model: `container/skills/*` copied into a container-local home directory.
+- Current model: worker config registers those skill paths directly with Codex.
 
-### Phase 2 (completed)
+Status: ✅ implemented
 
-1. Implemented a minimal Codex runtime adapter (`runtime/codex-runtime.ts`).
-2. Enabled actual provider switching to Codex in runtime factory.
-3. Added OpenAI key pass-through (`OPENAI_API_KEY`) for container runtime.
+## Removed pieces
 
-### Phase 3 (completed in this change)
+- `NANOCLAW_AGENT_PROVIDER`
+- Anthropic runtime path
+- container runtime detection and startup
+- container build pipeline as a runtime requirement
 
-1. Added container-side passthrough for Codex provider controls (`NANOCLAW_CODEX_*`).
-2. Added `OPENAI_BASE_URL` passthrough for non-default deployments.
+## Remaining gaps
 
-## Next phase
-
-1. Add Codex runtime parity for MCP tool wiring.
-2. Add Codex-side equivalent for pre-tool sanitization and pre-compaction archiving.
-3. Align permission/sandbox policy behavior across Anthropic and Codex modes.
+- The new sandbox model is intentionally weaker than the old container isolation model.
+- Read-only extra directories are snapshots, not live mounts.
+- Some older docs still describe the historical container architecture and should be treated as archival unless updated.

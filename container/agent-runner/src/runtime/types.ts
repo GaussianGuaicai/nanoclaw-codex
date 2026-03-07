@@ -6,6 +6,14 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  runtimePaths?: {
+    groupPath: string;
+    ipcPath: string;
+    codexHome: string;
+    additionalDirectories: string[];
+    writableRoots: string[];
+    sharedInstructionFiles: string[];
+  };
   secrets?: Record<string, string>;
 }
 
@@ -14,15 +22,20 @@ export type RuntimeHook = (...args: any[]) => any;
 export interface RuntimeHooks {
   onLog: (message: string) => void;
   onResult: (result: string | null, newSessionId?: string) => void;
-  onPreCompact: RuntimeHook;
-  onPreToolUseBash: RuntimeHook;
+}
+
+export interface RuntimeIpc {
+  shouldClose: () => boolean;
+  drainIpcInput: () => string[];
+  ipcPollMs: number;
 }
 
 export interface RunQueryInput {
   prompt: string;
   sessionId?: string;
   resumeAt?: string;
-  mcpServerPath: string;
+  mcpServerCommand: string;
+  mcpServerArgs: string[];
   containerInput: ContainerInput;
   sdkEnv: Record<string, string | undefined>;
 }
@@ -31,6 +44,7 @@ export interface RunQueryResult {
   newSessionId?: string;
   lastAssistantUuid?: string;
   closedDuringQuery: boolean;
+  nextPrompt?: string;
 }
 
 export interface AgentRuntime {

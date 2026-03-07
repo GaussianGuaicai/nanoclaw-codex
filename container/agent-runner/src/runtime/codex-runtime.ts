@@ -13,13 +13,8 @@ import {
   RunQueryInput,
   RunQueryResult,
   RuntimeHooks,
+  RuntimeIpc,
 } from './types.js';
-
-const BLOCKED_ENV_VARS = new Set([
-  'ANTHROPIC_API_KEY',
-  'ANTHROPIC_AUTH_TOKEN',
-  'CLAUDE_CODE_OAUTH_TOKEN',
-]);
 
 function parseBool(value: string | undefined, defaultValue: boolean): boolean {
   if (value == null) return defaultValue;
@@ -30,20 +25,25 @@ function parseBool(value: string | undefined, defaultValue: boolean): boolean {
 }
 
 function getCodexThreadOptions(input: RunQueryInput): ThreadOptions {
-  const { sdkEnv } = input;
+  const { sdkEnv, containerInput } = input;
+  const runtimePaths = containerInput.runtimePaths;
+  if (!runtimePaths) {
+    throw new Error('Missing runtimePaths in worker input');
+  }
 
   return {
-    workingDirectory: '/workspace/group',
-    additionalDirectories: fs.existsSync('/workspace/extra')
-      ? ['/workspace/extra']
-      : undefined,
+    workingDirectory: runtimePaths.groupPath,
+    additionalDirectories:
+      runtimePaths.additionalDirectories.length > 0
+        ? runtimePaths.additionalDirectories
+        : undefined,
     sandboxMode:
       (sdkEnv.NANOCLAW_CODEX_SANDBOX_MODE as ThreadOptions['sandboxMode']) ||
       'workspace-write',
     approvalPolicy:
       (sdkEnv.NANOCLAW_CODEX_APPROVAL_POLICY as ThreadOptions['approvalPolicy']) ||
       'never',
-    networkAccessEnabled: parseBool(sdkEnv.NANOCLAW_CODEX_NETWORK_ACCESS, false),
+    networkAccessEnabled: parseBool(sdkEnv.NANOCLAW_CODEX_NETWORK_ACCESS, true),
     webSearchEnabled: parseBool(
       sdkEnv.NANOCLAW_CODEX_WEB_SEARCH_ENABLED,
       false,
@@ -58,45 +58,83 @@ function getCodexThreadOptions(input: RunQueryInput): ThreadOptions {
   };
 }
 
-function getCodexProcessEnv(
-  sdkEnv: Record<string, string | undefined>,
-): Record<string, string> {
-  const allowedPrefix = ['NANOCLAW_', 'CODEX_', 'OPENAI_'];
-  const passthroughKeys = new Set(['PATH', 'HOME', 'SHELL', 'TZ', 'LANG', 'LC_ALL']);
+function loadSharedInstructions(files: string[]): string | undefined {
+  const sections: string[] = [];
+  const seen = new Set<string>();
 
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(sdkEnv)) {
-    if (!value) continue;
-    if (BLOCKED_ENV_VARS.has(key)) continue;
+  for (const file of files) {
+    const resolved = path.resolve(file);
+    if (seen.has(resolved) || !fs.existsSync(resolved)) continue;
+    seen.add(resolved);
 
-    const allowByPrefix = allowedPrefix.some(prefix => key.startsWith(prefix));
-    if (allowByPrefix || passthroughKeys.has(key)) {
-      env[key] = value;
-    }
+    const content = fs.readFileSync(resolved, 'utf-8').trim();
+    if (!content) continue;
+
+    const label = path.relative(process.cwd(), resolved) || resolved;
+    sections.push(`# Shared instructions from ${label}\n${content}`);
   }
 
-  return env;
+  return sections.length > 0 ? sections.join('\n\n') : undefined;
 }
 
 function getCodexOptions(input: RunQueryInput): CodexOptions {
   const { sdkEnv, containerInput } = input;
+  const runtimePaths = containerInput.runtimePaths;
+  if (!runtimePaths) {
+    throw new Error('Missing runtimePaths in worker input');
+  }
+
+  const skillsDir = path.join(process.cwd(), 'container', 'skills');
+  const skillConfigs =
+    fs.existsSync(skillsDir)
+      ? fs
+          .readdirSync(skillsDir)
+          .map((entry) => path.join(skillsDir, entry))
+          .filter((entry) => {
+            try {
+              return fs.statSync(entry).isDirectory();
+            } catch {
+              return false;
+            }
+          })
+          .map((entry) => ({ path: entry, enabled: true }))
+      : [];
+  const sharedInstructions = loadSharedInstructions(
+    runtimePaths.sharedInstructionFiles,
+  );
 
   return {
     ...(sdkEnv.OPENAI_API_KEY ? { apiKey: sdkEnv.OPENAI_API_KEY } : {}),
     baseUrl: sdkEnv.OPENAI_BASE_URL,
-    env: getCodexProcessEnv(sdkEnv),
     config: {
       mcp_servers: {
         nanoclaw: {
-          command: 'node',
-          args: [input.mcpServerPath],
+          command: input.mcpServerCommand,
+          args: input.mcpServerArgs,
           env: {
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            NANOCLAW_IPC_PATH: runtimePaths.ipcPath,
           },
         },
       },
+      sandbox_workspace_write: {
+        writable_roots: runtimePaths.writableRoots,
+        network_access: parseBool(sdkEnv.NANOCLAW_CODEX_NETWORK_ACCESS, true),
+      },
+      ...(skillConfigs.length > 0
+        ? {
+            skills: {
+              config: skillConfigs,
+            },
+          }
+        : {}),
+      ...(sharedInstructions
+        ? {
+            developer_instructions: sharedInstructions,
+          }
+        : {}),
     },
   };
 }
@@ -119,8 +157,17 @@ function eventSummary(event: ThreadEvent): string | null {
   return null;
 }
 
-function archiveCodexTurn(prompt: string, response: string, threadId?: string): void {
-  const conversationsDir = '/workspace/group/conversations';
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
+function archiveCodexTurn(
+  prompt: string,
+  response: string,
+  groupPath: string,
+  threadId?: string,
+): void {
+  const conversationsDir = path.join(groupPath, 'conversations');
   fs.mkdirSync(conversationsDir, { recursive: true });
 
   const date = new Date().toISOString().split('T')[0];
@@ -146,10 +193,17 @@ function archiveCodexTurn(prompt: string, response: string, threadId?: string): 
 }
 
 export class CodexRuntime implements AgentRuntime {
-  constructor(private readonly hooks: RuntimeHooks) {}
+  constructor(
+    private readonly hooks: RuntimeHooks,
+    private readonly ipc: RuntimeIpc,
+  ) {}
 
   async runQuery(input: RunQueryInput): Promise<RunQueryResult> {
-    const { prompt, sessionId, resumeAt } = input;
+    const { prompt, sessionId, resumeAt, containerInput } = input;
+    const runtimePaths = containerInput.runtimePaths;
+    if (!runtimePaths) {
+      throw new Error('Missing runtimePaths in worker input');
+    }
 
     if (resumeAt) {
       this.hooks.onLog(
@@ -157,10 +211,18 @@ export class CodexRuntime implements AgentRuntime {
       );
     }
 
+    // The SDK docs state that providing `env` disables inheritance from
+    // `process.env`. That breaks ChatGPT login-backed auth in CODEX_HOME on
+    // macOS, and can also drop OS-level config needed by the Codex CLI.
+    // Keep the full worker environment intact and only pin CODEX_HOME per group.
+    process.env.CODEX_HOME = runtimePaths.codexHome;
+
     if (input.sdkEnv.OPENAI_API_KEY) {
       this.hooks.onLog('Codex runtime auth mode: OPENAI_API_KEY');
     } else {
-      this.hooks.onLog('Codex runtime auth mode: ChatGPT login credentials (~/.codex)');
+      this.hooks.onLog(
+        `Codex runtime auth mode: CODEX_HOME credentials (${runtimePaths.codexHome})`,
+      );
     }
 
     const codex = new Codex(getCodexOptions(input));
@@ -169,26 +231,102 @@ export class CodexRuntime implements AgentRuntime {
       ? codex.resumeThread(sessionId, threadOptions)
       : codex.startThread(threadOptions);
 
+    const abortController = new AbortController();
+    let ipcPolling = true;
+    let pollTimer: NodeJS.Timeout | null = null;
+    let closedDuringQuery = false;
+    let nextPrompt: string | undefined;
+
+    const stopIpcPolling = () => {
+      ipcPolling = false;
+      if (pollTimer) {
+        clearTimeout(pollTimer);
+        pollTimer = null;
+      }
+    };
+
+    const pollIpcDuringQuery = () => {
+      if (!ipcPolling) return;
+
+      if (this.ipc.shouldClose()) {
+        closedDuringQuery = true;
+        this.hooks.onLog('Close sentinel detected during Codex query');
+        stopIpcPolling();
+        abortController.abort();
+        return;
+      }
+
+      const messages = this.ipc.drainIpcInput();
+      if (messages.length > 0) {
+        nextPrompt = messages.join('\n');
+        this.hooks.onLog(
+          `Received ${messages.length} IPC message(s) during Codex query; interrupting turn`,
+        );
+        stopIpcPolling();
+        abortController.abort();
+        return;
+      }
+
+      pollTimer = setTimeout(pollIpcDuringQuery, this.ipc.ipcPollMs);
+    };
+
     let finalText = '';
     let newSessionId = thread.id || sessionId || undefined;
 
-    const streamed = await thread.runStreamed(prompt);
-    for await (const event of streamed.events) {
-      if (event.type === 'thread.started') {
-        newSessionId = event.thread_id;
+    pollTimer = setTimeout(pollIpcDuringQuery, this.ipc.ipcPollMs);
+
+    try {
+      const streamed = await thread.runStreamed(prompt, {
+        signal: abortController.signal,
+      });
+      for await (const event of streamed.events) {
+        if (event.type === 'thread.started') {
+          newSessionId = event.thread_id;
+        }
+
+        if (
+          event.type === 'item.completed' &&
+          event.item.type === 'agent_message'
+        ) {
+          finalText = event.item.text || finalText;
+        }
+
+        const summary = eventSummary(event);
+        if (summary) {
+          this.hooks.onLog(`[codex] ${summary}`);
+        }
+      }
+    } catch (error) {
+      if (
+        !abortController.signal.aborted ||
+        (!closedDuringQuery && nextPrompt == null && !isAbortError(error))
+      ) {
+        throw error;
       }
 
-      if (event.type === 'item.completed' && event.item.type === 'agent_message') {
-        finalText = event.item.text || finalText;
-      }
-
-      const summary = eventSummary(event);
-      if (summary) {
-        this.hooks.onLog(`[codex] ${summary}`);
-      }
+      this.hooks.onLog('Codex query interrupted to handle IPC input');
+    } finally {
+      stopIpcPolling();
     }
 
-    archiveCodexTurn(prompt, finalText, newSessionId);
+    if (closedDuringQuery) {
+      return {
+        newSessionId: newSessionId || undefined,
+        lastAssistantUuid: undefined,
+        closedDuringQuery: true,
+      };
+    }
+
+    if (nextPrompt != null) {
+      return {
+        newSessionId: newSessionId || undefined,
+        lastAssistantUuid: undefined,
+        closedDuringQuery: false,
+        nextPrompt,
+      };
+    }
+
+    archiveCodexTurn(prompt, finalText, runtimePaths.groupPath, newSessionId);
     this.hooks.onResult(finalText || null, newSessionId || undefined);
 
     return {

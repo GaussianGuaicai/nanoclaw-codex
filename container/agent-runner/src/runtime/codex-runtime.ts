@@ -19,6 +19,8 @@ const BLOCKED_ENV_VARS = new Set([
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AUTH_TOKEN',
   'CLAUDE_CODE_OAUTH_TOKEN',
+  'OPENAI_API_KEY',
+  'OPENAI_BASE_URL',
 ]);
 
 function parseBool(value: string | undefined, defaultValue: boolean): boolean {
@@ -30,20 +32,25 @@ function parseBool(value: string | undefined, defaultValue: boolean): boolean {
 }
 
 function getCodexThreadOptions(input: RunQueryInput): ThreadOptions {
-  const { sdkEnv } = input;
+  const { sdkEnv, containerInput } = input;
+  const runtimePaths = containerInput.runtimePaths;
+  if (!runtimePaths) {
+    throw new Error('Missing runtimePaths in worker input');
+  }
 
   return {
-    workingDirectory: '/workspace/group',
-    additionalDirectories: fs.existsSync('/workspace/extra')
-      ? ['/workspace/extra']
-      : undefined,
+    workingDirectory: runtimePaths.groupPath,
+    additionalDirectories:
+      runtimePaths.additionalDirectories.length > 0
+        ? runtimePaths.additionalDirectories
+        : undefined,
     sandboxMode:
       (sdkEnv.NANOCLAW_CODEX_SANDBOX_MODE as ThreadOptions['sandboxMode']) ||
       'workspace-write',
     approvalPolicy:
       (sdkEnv.NANOCLAW_CODEX_APPROVAL_POLICY as ThreadOptions['approvalPolicy']) ||
       'never',
-    networkAccessEnabled: parseBool(sdkEnv.NANOCLAW_CODEX_NETWORK_ACCESS, false),
+    networkAccessEnabled: parseBool(sdkEnv.NANOCLAW_CODEX_NETWORK_ACCESS, true),
     webSearchEnabled: parseBool(
       sdkEnv.NANOCLAW_CODEX_WEB_SEARCH_ENABLED,
       false,
@@ -60,31 +67,60 @@ function getCodexThreadOptions(input: RunQueryInput): ThreadOptions {
 
 function getCodexProcessEnv(
   sdkEnv: Record<string, string | undefined>,
+  codexHome: string,
 ): Record<string, string> {
-  const allowedPrefix = ['NANOCLAW_', 'CODEX_', 'OPENAI_'];
-  const passthroughKeys = new Set(['PATH', 'HOME', 'SHELL', 'TZ', 'LANG', 'LC_ALL']);
+  const passthroughKeys = new Set([
+    'PATH',
+    'HOME',
+    'SHELL',
+    'TZ',
+    'LANG',
+    'LC_ALL',
+    'TMPDIR',
+    'TERM',
+    'COLORTERM',
+  ]);
 
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(sdkEnv)) {
     if (!value) continue;
     if (BLOCKED_ENV_VARS.has(key)) continue;
-
-    const allowByPrefix = allowedPrefix.some(prefix => key.startsWith(prefix));
-    if (allowByPrefix || passthroughKeys.has(key)) {
+    if (passthroughKeys.has(key)) {
       env[key] = value;
     }
   }
 
+  env.CODEX_HOME = codexHome;
   return env;
 }
 
 function getCodexOptions(input: RunQueryInput): CodexOptions {
   const { sdkEnv, containerInput } = input;
+  const runtimePaths = containerInput.runtimePaths;
+  if (!runtimePaths) {
+    throw new Error('Missing runtimePaths in worker input');
+  }
+
+  const skillsDir = path.join(process.cwd(), 'container', 'skills');
+  const skillConfigs =
+    fs.existsSync(skillsDir)
+      ? fs
+          .readdirSync(skillsDir)
+          .map((entry) => path.join(skillsDir, entry))
+          .filter((entry) => {
+            try {
+              return fs.statSync(entry).isDirectory();
+            } catch {
+              return false;
+            }
+          })
+          .map((entry) => ({ path: entry, enabled: true }))
+      : [];
 
   return {
     ...(sdkEnv.OPENAI_API_KEY ? { apiKey: sdkEnv.OPENAI_API_KEY } : {}),
     baseUrl: sdkEnv.OPENAI_BASE_URL,
-    env: getCodexProcessEnv(sdkEnv),
+    env: getCodexProcessEnv(sdkEnv, runtimePaths.codexHome),
     config: {
       mcp_servers: {
         nanoclaw: {
@@ -94,9 +130,21 @@ function getCodexOptions(input: RunQueryInput): CodexOptions {
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            NANOCLAW_IPC_PATH: runtimePaths.ipcPath,
           },
         },
       },
+      sandbox_workspace_write: {
+        writable_roots: runtimePaths.writableRoots,
+        network_access: parseBool(sdkEnv.NANOCLAW_CODEX_NETWORK_ACCESS, true),
+      },
+      ...(skillConfigs.length > 0
+        ? {
+            skills: {
+              config: skillConfigs,
+            },
+          }
+        : {}),
     },
   };
 }
@@ -119,8 +167,13 @@ function eventSummary(event: ThreadEvent): string | null {
   return null;
 }
 
-function archiveCodexTurn(prompt: string, response: string, threadId?: string): void {
-  const conversationsDir = '/workspace/group/conversations';
+function archiveCodexTurn(
+  prompt: string,
+  response: string,
+  groupPath: string,
+  threadId?: string,
+): void {
+  const conversationsDir = path.join(groupPath, 'conversations');
   fs.mkdirSync(conversationsDir, { recursive: true });
 
   const date = new Date().toISOString().split('T')[0];
@@ -149,7 +202,11 @@ export class CodexRuntime implements AgentRuntime {
   constructor(private readonly hooks: RuntimeHooks) {}
 
   async runQuery(input: RunQueryInput): Promise<RunQueryResult> {
-    const { prompt, sessionId, resumeAt } = input;
+    const { prompt, sessionId, resumeAt, containerInput } = input;
+    const runtimePaths = containerInput.runtimePaths;
+    if (!runtimePaths) {
+      throw new Error('Missing runtimePaths in worker input');
+    }
 
     if (resumeAt) {
       this.hooks.onLog(
@@ -160,7 +217,9 @@ export class CodexRuntime implements AgentRuntime {
     if (input.sdkEnv.OPENAI_API_KEY) {
       this.hooks.onLog('Codex runtime auth mode: OPENAI_API_KEY');
     } else {
-      this.hooks.onLog('Codex runtime auth mode: ChatGPT login credentials (~/.codex)');
+      this.hooks.onLog(
+        `Codex runtime auth mode: CODEX_HOME credentials (${runtimePaths.codexHome})`,
+      );
     }
 
     const codex = new Codex(getCodexOptions(input));
@@ -188,7 +247,7 @@ export class CodexRuntime implements AgentRuntime {
       }
     }
 
-    archiveCodexTurn(prompt, finalText, newSessionId);
+    archiveCodexTurn(prompt, finalText, runtimePaths.groupPath, newSessionId);
     this.hooks.onResult(finalText || null, newSessionId || undefined);
 
     return {

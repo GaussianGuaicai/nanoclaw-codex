@@ -1,16 +1,16 @@
 export interface AdditionalMount {
   hostPath: string; // Absolute path on host (supports ~ for home)
-  containerPath?: string; // Optional — defaults to basename of hostPath. Mounted at /workspace/extra/{value}
+  containerPath?: string; // Compatibility alias for the snapshot/writable-root name under /workspace/extra/{value}
   readonly?: boolean; // Default: true for safety
 }
 
 /**
  * Mount Allowlist - Security configuration for additional mounts
  * This file should be stored at ~/.config/nanoclaw/mount-allowlist.json
- * and is NOT mounted into any container, making it tamper-proof from agents.
+ * and is never exposed to workers, making it tamper-proof from agents.
  */
 export interface MountAllowlist {
-  // Directories that can be mounted into containers
+  // Directories that can become worker writable roots or snapshot sources
   allowedRoots: AllowedRoot[];
   // Glob patterns for paths that should never be mounted (e.g., ".ssh", ".gnupg")
   blockedPatterns: string[];

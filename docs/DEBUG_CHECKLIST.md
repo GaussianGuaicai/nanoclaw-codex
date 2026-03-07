@@ -1,120 +1,101 @@
 # NanoClaw Debug Checklist
 
-## Known Issues (2026-02-08)
+## Known Issues (2026-03-07)
 
-### 1. [FIXED] Resume branches from stale tree position
-When agent teams spawns subagent CLI processes, they write to the same session JSONL. On subsequent `query()` resumes, the CLI reads the JSONL but may pick a stale branch tip (from before the subagent activity), causing the agent's response to land on a branch the host never receives a `result` for. **Fix**: pass `resumeSessionAt` with the last assistant message UUID to explicitly anchor each resume.
+### 1. IDLE_TIMEOUT == AGENT_TIMEOUT (both 30 min)
+Both timers fire at the same time, so workers can still exit via hard kill instead of graceful `_close` shutdown. The idle timeout should eventually be shorter so workers wind down between messages, while the hard timeout remains a safety net for stuck runs.
 
-### 2. IDLE_TIMEOUT == CONTAINER_TIMEOUT (both 30 min)
-Both timers fire at the same time, so containers always exit via hard SIGKILL (code 137) instead of graceful `_close` sentinel shutdown. The idle timeout should be shorter (e.g., 5 min) so containers wind down between messages, while container timeout stays at 30 min as a safety net for stuck agents.
-
-### 3. Cursor advanced before agent succeeds
-`processGroupMessages` advances `lastAgentTimestamp` before the agent runs. If the container times out, retries find no messages (cursor already past them). Messages are permanently lost on timeout.
+### 2. Cursor advanced before agent succeeds
+`processGroupMessages` advances `lastAgentTimestamp` before the agent finishes. If the worker fails before sending output, retries can miss messages unless the rollback path triggers correctly.
 
 ## Quick Status Check
 
 ```bash
 # 1. Is the service running?
 launchctl list | grep nanoclaw
-# Expected: PID  0  com.nanoclaw (PID = running, "-" = not running, non-zero exit = crashed)
 
-# 2. Any running containers?
-container ls --format '{{.Names}} {{.Status}}' 2>/dev/null | grep nanoclaw
+# 2. Is the local worker build present?
+ls -la container/agent-runner/dist/index.js
 
-# 3. Any stopped/orphaned containers?
-container ls -a --format '{{.Names}} {{.Status}}' 2>/dev/null | grep nanoclaw
-
-# 4. Recent errors in service log?
+# 3. Recent warnings/errors in the service log
 grep -E 'ERROR|WARN' logs/nanoclaw.log | tail -20
 
-# 5. Is WhatsApp connected? (look for last connection event)
+# 4. Is WhatsApp connected?
 grep -E 'Connected to WhatsApp|Connection closed|connection.*close' logs/nanoclaw.log | tail -5
 
-# 6. Are groups loaded?
+# 5. Are groups loaded?
 grep 'groupCount' logs/nanoclaw.log | tail -3
 ```
 
-## Session Transcript Branching
+## Worker Timeout Investigation
 
 ```bash
-# Check for concurrent CLI processes in session debug logs
-ls -la data/sessions/<group>/.claude/debug/
+# Check for recent worker timeouts
+grep -E 'Worker timed out|timed out' logs/nanoclaw.log | tail -10
 
-# Count unique SDK processes that handled messages
-# Each .txt file = one CLI subprocess. Multiple = concurrent queries.
+# Check worker run logs
+ls -lt groups/*/logs/worker-*.log | head -10
 
-# Check parentUuid branching in transcript
-python3 -c "
-import json, sys
-lines = open('data/sessions/<group>/.claude/projects/-workspace-group/<session>.jsonl').read().strip().split('\n')
-for i, line in enumerate(lines):
-  try:
-    d = json.loads(line)
-    if d.get('type') == 'user' and d.get('message'):
-      parent = d.get('parentUuid', 'ROOT')[:8]
-      content = str(d['message'].get('content', ''))[:60]
-      print(f'L{i+1} parent={parent} {content}')
-  except: pass
-"
-```
+# Read the most recent worker log
+cat groups/<group>/logs/worker-<timestamp>.log
 
-## Container Timeout Investigation
-
-```bash
-# Check for recent timeouts
-grep -E 'Container timeout|timed out' logs/nanoclaw.log | tail -10
-
-# Check container log files for the timed-out container
-ls -lt groups/*/logs/container-*.log | head -10
-
-# Read the most recent container log (replace path)
-cat groups/<group>/logs/container-<timestamp>.log
-
-# Check if retries were scheduled and what happened
+# Check retries
 grep -E 'Scheduling retry|retry|Max retries' logs/nanoclaw.log | tail -10
 ```
 
 ## Agent Not Responding
 
 ```bash
-# Check if messages are being received from WhatsApp
+# Check inbound messages
 grep 'New messages' logs/nanoclaw.log | tail -10
 
-# Check if messages are being processed (container spawned)
-grep -E 'Processing messages|Spawning container' logs/nanoclaw.log | tail -10
+# Check if workers are being launched
+grep -E 'Processing messages|Spawning local Codex worker|Starting worker' logs/nanoclaw.log | tail -10
 
-# Check if messages are being piped to active container
+# Check if messages are being piped to an active worker
 grep -E 'Piped messages|sendMessage' logs/nanoclaw.log | tail -10
 
-# Check the queue state — any active containers?
-grep -E 'Starting container|Container active|concurrency limit' logs/nanoclaw.log | tail -10
+# Check the queue state
+grep -E 'Worker active|Starting worker|concurrency limit' logs/nanoclaw.log | tail -10
 
-# Check lastAgentTimestamp vs latest message timestamp
+# Compare lastAgentTimestamp vs latest message timestamp
 sqlite3 store/messages.db "SELECT chat_jid, MAX(timestamp) as latest FROM messages GROUP BY chat_jid ORDER BY latest DESC LIMIT 5;"
 ```
 
-## Container Mount Issues
+## Writable Roots / Snapshot Issues
 
 ```bash
-# Check mount validation logs (shows on container spawn)
-grep -E 'Mount validated|Mount.*REJECTED|mount' logs/nanoclaw.log | tail -10
+# Check allowlist validation and path mapping logs
+grep -E 'Mount validated|Mount.*REJECTED|layout|writableRoots|additionalDirectories' logs/nanoclaw.log | tail -20
 
-# Verify the mount allowlist is readable
+# Verify the mount allowlist
 cat ~/.config/nanoclaw/mount-allowlist.json
 
-# Check group's container_config in DB
+# Check group's compatibility config in DB
 sqlite3 store/messages.db "SELECT name, container_config FROM registered_groups;"
 
-# Test-run a container to check mounts (dry run)
-# Replace <group-folder> with the group's folder name
-container run -i --rm --entrypoint ls nanoclaw-agent:latest /workspace/extra/
+# Inspect the latest worker layout snapshot
+grep -n 'Runtime Layout' -A40 groups/<group>/logs/worker-<timestamp>.log
+```
+
+## IPC / Task Issues
+
+```bash
+# Inspect per-group IPC state
+find data/ipc -maxdepth 2 -type f | sort
+
+# Read current task snapshot for a group
+cat data/ipc/<group-folder>/current_tasks.json
+
+# Read available groups snapshot
+cat data/ipc/<group-folder>/available_groups.json
 ```
 
 ## WhatsApp Auth Issues
 
 ```bash
-# Check if QR code was requested (means auth expired)
-grep 'QR\|authentication required\|qr' logs/nanoclaw.log | tail -5
+# Check if QR code was requested
+grep 'QR\\|authentication required\\|qr' logs/nanoclaw.log | tail -5
 
 # Check auth files exist
 ls -la store/auth/
@@ -132,7 +113,7 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 # View live logs
 tail -f logs/nanoclaw.log
 
-# Stop the service (careful — running containers are detached, not killed)
+# Stop the service (careful — running workers are detached, not killed)
 launchctl bootout gui/$(id -u)/com.nanoclaw
 
 # Start the service

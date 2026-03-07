@@ -6,6 +6,13 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  runtimePaths?: {
+    groupPath: string;
+    ipcPath: string;
+    codexHome: string;
+    additionalDirectories: string[];
+    writableRoots: string[];
+  };
   secrets?: Record<string, string>;
 }
 
@@ -14,8 +21,6 @@ export type RuntimeHook = (...args: any[]) => any;
 export interface RuntimeHooks {
   onLog: (message: string) => void;
   onResult: (result: string | null, newSessionId?: string) => void;
-  onPreCompact: RuntimeHook;
-  onPreToolUseBash: RuntimeHook;
 }
 
 export interface RunQueryInput {

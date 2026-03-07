@@ -5,55 +5,52 @@
 | Entity | Trust Level | Rationale |
 |--------|-------------|-----------|
 | Main group | Trusted | Private self-chat, admin control |
-| Non-main groups | Untrusted | Other users may be malicious |
-| Container agents | Sandboxed | Isolated execution environment |
-| WhatsApp messages | User input | Potential prompt injection |
+| Non-main groups | Lower trust | Other users may be malicious |
+| Codex workers | Sandboxed | Restricted by Codex sandbox plus host-prepared paths |
+| Channel messages | User input | Potential prompt injection |
 
-## Security Boundaries
+## Primary Boundaries
 
-### 1. Container Isolation (Primary Boundary)
+### 1. Host-Orchestrated Codex Sandbox
 
-Agents execute in containers (lightweight Linux VMs), providing:
-- **Process isolation** - Container processes cannot affect the host
-- **Filesystem isolation** - Only explicitly mounted directories are visible
-- **Non-root execution** - Runs as unprivileged `node` user (uid 1000)
-- **Ephemeral containers** - Fresh environment per invocation (`--rm`)
+Agents no longer run in Linux containers. Each invocation starts a local Codex worker with:
 
-This is the primary security boundary. Rather than relying on application-level permission checks, the attack surface is limited by what's mounted.
+- `sandbox_mode=workspace-write`
+- `approval_policy=never`
+- a per-group working directory
+- host-selected extra writable roots
+- optional read-only snapshots copied into a group-scoped context directory
 
-### 2. Mount Security
+This is weaker isolation than the old container model. The boundary is now the Codex sandbox plus what the host process decides to expose.
 
-**External Allowlist** - Mount permissions stored at `~/.config/nanoclaw/mount-allowlist.json`, which is:
-- Outside project root
-- Never mounted into containers
-- Cannot be modified by agents
+### 2. Group-Scoped State
 
-**Default Blocked Patterns:**
-```
-.ssh, .gnupg, .aws, .azure, .gcloud, .kube, .docker,
-credentials, .env, .netrc, .npmrc, id_rsa, id_ed25519,
-private_key, .secret
-```
+Each group gets isolated local Codex state at `data/sessions/{group}/.codex`.
 
-**Protections:**
-- Symlink resolution before validation (prevents traversal attacks)
-- Container path validation (rejects `..` and absolute paths)
-- `nonMainReadOnly` option forces read-only for non-main groups
+That directory is used as `CODEX_HOME`, so groups do not share:
 
-**Read-Only Project Root:**
+- Codex session transcripts
+- local auth state
+- Codex logs and caches
+- resumable thread metadata
 
-The main group's project root is mounted read-only. Writable paths the agent needs (group folder, IPC, `.claude/`) are mounted separately. This prevents the agent from modifying host application code (`src/`, `dist/`, `package.json`, etc.) which would bypass the sandbox entirely on next restart.
+### 3. Mount Allowlist Compatibility
 
-### 3. Session Isolation
+Group `containerConfig.additionalMounts` is still accepted, but interpreted differently:
 
-Each group has isolated Claude sessions at `data/sessions/{group}/.claude/`:
-- Groups cannot see other groups' conversation history
-- Session data includes full message history and file contents read
-- Prevents cross-group information disclosure
+- read-only mounts become copied snapshots under a per-group sandbox context directory
+- read-write mounts become extra writable roots only if allowed by `~/.config/nanoclaw/mount-allowlist.json`
+
+Protections kept from the old model:
+
+- allowlist stored outside the repo
+- symlink resolution before validation
+- blocked path patterns such as `.ssh`, `.gnupg`, `.aws`, `.env`, `id_rsa`
+- optional forced read-only behavior for non-main groups
 
 ### 4. IPC Authorization
 
-Messages and task operations are verified against group identity:
+The host still owns all messaging and task side effects.
 
 | Operation | Main Group | Non-Main Group |
 |-----------|------------|----------------|
@@ -64,60 +61,49 @@ Messages and task operations are verified against group identity:
 | View all tasks | ✓ | Own only |
 | Manage other groups | ✓ | ✗ |
 
+Workers can only request those actions through the local MCP/IPC bridge. Authorization is enforced by the host process when IPC files are consumed.
+
 ### 5. Credential Handling
 
-**Mounted Credentials:**
-- Claude auth tokens (filtered from `.env`, read-only)
+The worker receives only a filtered set of runtime secrets from `.env`:
 
-**NOT Mounted:**
-- WhatsApp session (`store/auth/`) - host only
-- Mount allowlist - external, never mounted
-- Any credentials matching blocked patterns
+- `OPENAI_API_KEY`
+- `OPENAI_BASE_URL`
+- `NANOCLAW_CODEX_*`
 
-**Credential Filtering:**
-Only these environment variables are exposed to containers:
-```typescript
-const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
-```
+These secrets are passed from host to worker input, then used to configure Codex. The worker does not blindly inherit the host shell environment, and Codex subprocesses are started with a minimal environment plus `CODEX_HOME`.
 
-> **Note:** Anthropic credentials are mounted so that Claude Code can authenticate when the agent runs. However, this means the agent itself can discover these credentials via Bash or file operations. Ideally, Claude Code would authenticate without exposing credentials to the agent's execution environment, but I couldn't figure this out. **PRs welcome** if you have ideas for credential isolation.
+Host-only secrets remain outside the worker runtime:
 
-## Privilege Comparison
+- channel auth state under `store/`
+- mount allowlist config
+- sender allowlist config
+
+## Effective Access Model
 
 | Capability | Main Group | Non-Main Group |
 |------------|------------|----------------|
-| Project root access | `/workspace/project` (ro) | None |
-| Group folder | `/workspace/group` (rw) | `/workspace/group` (rw) |
-| Global memory | Implicit via project | `/workspace/global` (ro) |
-| Additional mounts | Configurable | Read-only unless allowed |
-| Network access | Unrestricted | Unrestricted |
-| MCP tools | All | All |
+| Group folder | read-write | read-write |
+| Project root | read-write | none by default |
+| Global memory | available via snapshot or repo access | snapshot copy |
+| Extra readonly mounts | snapshot copies | snapshot copies |
+| Extra read-write mounts | allowlist-controlled | usually blocked or forced readonly |
+| Network access | enabled by default | enabled by default |
+
+## Residual Risks
+
+- Codex sandbox is not equivalent to container or VM isolation.
+- Main group can now modify the repo root directly.
+- Read-only snapshots can drift from the source between runs because they are copied, not mounted live.
+- If a writable root is approved by the host allowlist, Codex can mutate it directly.
 
 ## Security Architecture Diagram
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                        UNTRUSTED ZONE                             │
-│  WhatsApp Messages (potentially malicious)                        │
-└────────────────────────────────┬─────────────────────────────────┘
-                                 │
-                                 ▼ Trigger check, input escaping
-┌──────────────────────────────────────────────────────────────────┐
-│                     HOST PROCESS (TRUSTED)                        │
-│  • Message routing                                                │
-│  • IPC authorization                                              │
-│  • Mount validation (external allowlist)                          │
-│  • Container lifecycle                                            │
-│  • Credential filtering                                           │
-└────────────────────────────────┬─────────────────────────────────┘
-                                 │
-                                 ▼ Explicit mounts only
-┌──────────────────────────────────────────────────────────────────┐
-│                CONTAINER (ISOLATED/SANDBOXED)                     │
-│  • Agent execution                                                │
-│  • Bash commands (sandboxed)                                      │
-│  • File operations (limited to mounts)                            │
-│  • Network access (unrestricted)                                  │
-│  • Cannot modify security config                                  │
-└──────────────────────────────────────────────────────────────────┘
+```text
+Untrusted messages
+  -> host router / DB / IPC authorization
+  -> host prepares working dir, snapshots, writable roots
+  -> local Codex worker
+  -> Codex sandbox + MCP bridge
+  -> host applies side effects
 ```

@@ -2,7 +2,7 @@
  * Mount Security Module for NanoClaw
  *
  * Validates additional mounts against an allowlist stored OUTSIDE the project root.
- * This prevents container agents from modifying security configuration.
+ * This prevents workers from modifying security configuration.
  *
  * Allowlist location: ~/.config/nanoclaw/mount-allowlist.json
  */
@@ -197,7 +197,7 @@ function findAllowedRoot(
 }
 
 /**
- * Validate the container path to prevent escaping /workspace/extra/
+ * Validate the legacy containerPath alias to prevent escaping /workspace/extra/
  */
 function isValidContainerPath(containerPath: string): boolean {
   // Must not contain .. to prevent path traversal

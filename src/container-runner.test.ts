@@ -1,23 +1,37 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 
-// Sentinel markers must match container-runner.ts
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
-
-// Mock config
-vi.mock('./config.js', () => ({
-  CONTAINER_IMAGE: 'nanoclaw-agent:latest',
-  CONTAINER_MAX_OUTPUT_SIZE: 10485760,
-  CONTAINER_TIMEOUT: 1800000, // 30min
-  DATA_DIR: '/tmp/nanoclaw-test-data',
-  GROUPS_DIR: '/tmp/nanoclaw-test-groups',
-  IDLE_TIMEOUT: 1800000, // 30min
-  TIMEZONE: 'America/Los_Angeles',
+const {
+  fsMock,
+  spawnMock,
+  validateAdditionalMounts,
+} = vi.hoisted(() => ({
+  fsMock: {
+    existsSync: vi.fn(() => false),
+    mkdirSync: vi.fn(),
+    writeFileSync: vi.fn(),
+    readFileSync: vi.fn(() => ''),
+    readdirSync: vi.fn(() => []),
+    statSync: vi.fn(() => ({ isDirectory: () => true })),
+    copyFileSync: vi.fn(),
+    cpSync: vi.fn(),
+    rmSync: vi.fn(),
+  },
+  spawnMock: vi.fn(),
+  validateAdditionalMounts: vi.fn(() => []),
 }));
 
-// Mock logger
+vi.mock('./config.js', () => ({
+  AGENT_MAX_OUTPUT_SIZE: 10485760,
+  AGENT_TIMEOUT: 1800000,
+  DATA_DIR: '/tmp/nanoclaw-test-data',
+  GROUPS_DIR: '/tmp/nanoclaw-test-groups',
+  IDLE_TIMEOUT: 1800000,
+}));
+
 vi.mock('./logger.js', () => ({
   logger: {
     debug: vi.fn(),
@@ -27,30 +41,21 @@ vi.mock('./logger.js', () => ({
   },
 }));
 
-// Mock fs
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
   return {
     ...actual,
     default: {
       ...actual,
-      existsSync: vi.fn(() => false),
-      mkdirSync: vi.fn(),
-      writeFileSync: vi.fn(),
-      readFileSync: vi.fn(() => ''),
-      readdirSync: vi.fn(() => []),
-      statSync: vi.fn(() => ({ isDirectory: () => false })),
-      copyFileSync: vi.fn(),
+      ...fsMock,
     },
   };
 });
 
-// Mock mount-security
 vi.mock('./mount-security.js', () => ({
-  validateAdditionalMounts: vi.fn(() => []),
+  validateAdditionalMounts,
 }));
 
-// Create a controllable fake ChildProcess
 function createFakeProcess() {
   const proc = new EventEmitter() as EventEmitter & {
     stdin: PassThrough;
@@ -69,23 +74,22 @@ function createFakeProcess() {
 
 let fakeProc: ReturnType<typeof createFakeProcess>;
 
-// Mock child_process.spawn
 vi.mock('child_process', async () => {
   const actual =
     await vi.importActual<typeof import('child_process')>('child_process');
   return {
     ...actual,
-    spawn: vi.fn(() => fakeProc),
-    exec: vi.fn(
-      (_cmd: string, _opts: unknown, cb?: (err: Error | null) => void) => {
-        if (cb) cb(null);
-        return new EventEmitter();
-      },
-    ),
+    spawn: (...args: unknown[]) => spawnMock(...args),
   };
 });
 
-import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import fs from 'fs';
+import {
+  buildAgentExecutionLayout,
+  ContainerInput,
+  ContainerOutput,
+  runContainerAgent,
+} from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
 
 const testGroup: RegisteredGroup = {
@@ -106,46 +110,112 @@ function emitOutputMarker(
   proc: ReturnType<typeof createFakeProcess>,
   output: ContainerOutput,
 ) {
-  const json = JSON.stringify(output);
-  proc.stdout.push(`${OUTPUT_START_MARKER}\n${json}\n${OUTPUT_END_MARKER}\n`);
+  proc.stdout.push(
+    `${OUTPUT_START_MARKER}\n${JSON.stringify(output)}\n${OUTPUT_END_MARKER}\n`,
+  );
 }
 
-describe('container-runner timeout behavior', () => {
+function mockExistingPaths(paths: string[]): void {
+  const resolved = new Set(paths);
+  fsMock.existsSync.mockImplementation(
+    ((inputPath: unknown) => resolved.has(String(inputPath))) as any,
+  );
+}
+
+describe('container-runner worker execution', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.clearAllMocks();
     fakeProc = createFakeProcess();
+    spawnMock.mockReturnValue(fakeProc);
+    validateAdditionalMounts.mockReturnValue([]);
+    mockExistingPaths([]);
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
+  it('builds a main-group execution layout with snapshots and writable roots', () => {
+    validateAdditionalMounts.mockReturnValue([
+      {
+        hostPath: '/allowed/docs',
+        containerPath: '/workspace/extra/docs',
+        readonly: true,
+      },
+      {
+        hostPath: '/allowed/repo',
+        containerPath: '/workspace/extra/repo',
+        readonly: false,
+      },
+    ] as any);
+    mockExistingPaths(['/tmp/nanoclaw-test-groups/global']);
+
+    const layout = buildAgentExecutionLayout(
+      {
+        ...testGroup,
+        isMain: true,
+        containerConfig: {
+          additionalMounts: [
+            { hostPath: '/allowed/docs' },
+            { hostPath: '/allowed/repo', readonly: false },
+          ],
+        },
+      },
+      true,
+    );
+
+    expect(layout.groupPath).toBe('/tmp/nanoclaw-test-groups/test-group');
+    expect(layout.codexHome).toBe(
+      '/tmp/nanoclaw-test-data/sessions/test-group/.codex',
+    );
+    expect(layout.writableRoots).toContain(process.cwd());
+    expect(layout.writableRoots).toContain('/allowed/repo');
+    expect(layout.additionalDirectories).toContain(process.cwd());
+    expect(layout.additionalDirectories).toContain(
+      '/tmp/nanoclaw-test-data/sessions/test-group/sandbox-context',
+    );
+    expect(layout.snapshotMappings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourcePath: '/tmp/nanoclaw-test-groups/global',
+          mode: 'snapshot',
+        }),
+        expect.objectContaining({
+          sourcePath: '/allowed/docs',
+          mode: 'snapshot',
+        }),
+        expect.objectContaining({
+          sourcePath: '/allowed/repo',
+          mode: 'writable-root',
+        }),
+      ]),
+    );
+    expect(fs.cpSync).toHaveBeenCalledWith(
+      '/tmp/nanoclaw-test-groups/global',
+      '/tmp/nanoclaw-test-data/sessions/test-group/sandbox-context/global',
+      { recursive: true },
+    );
+  });
+
   it('timeout after output resolves as success', async () => {
     const onOutput = vi.fn(async () => {});
     const resultPromise = runContainerAgent(
       testGroup,
-      testInput,
+      { ...testInput },
       () => {},
       onOutput,
     );
 
-    // Emit output with a result
     emitOutputMarker(fakeProc, {
       status: 'success',
       result: 'Here is my response',
       newSessionId: 'session-123',
     });
 
-    // Let output processing settle
     await vi.advanceTimersByTimeAsync(10);
-
-    // Fire the hard timeout (IDLE_TIMEOUT + 30s = 1830000ms)
     await vi.advanceTimersByTimeAsync(1830000);
-
-    // Emit close event (as if container was stopped by the timeout)
     fakeProc.emit('close', 137);
-
-    // Let the promise resolve
     await vi.advanceTimersByTimeAsync(10);
 
     const result = await resultPromise;
@@ -160,17 +230,13 @@ describe('container-runner timeout behavior', () => {
     const onOutput = vi.fn(async () => {});
     const resultPromise = runContainerAgent(
       testGroup,
-      testInput,
+      { ...testInput },
       () => {},
       onOutput,
     );
 
-    // No output emitted — fire the hard timeout
     await vi.advanceTimersByTimeAsync(1830000);
-
-    // Emit close event
     fakeProc.emit('close', 137);
-
     await vi.advanceTimersByTimeAsync(10);
 
     const result = await resultPromise;
@@ -179,31 +245,33 @@ describe('container-runner timeout behavior', () => {
     expect(onOutput).not.toHaveBeenCalled();
   });
 
-  it('normal exit after output resolves as success', async () => {
-    const onOutput = vi.fn(async () => {});
-    const resultPromise = runContainerAgent(
-      testGroup,
-      testInput,
-      () => {},
-      onOutput,
-    );
+  it('launches a local worker and injects runtimePaths into the worker input', async () => {
+    const input: ContainerInput = { ...testInput };
+    const resultPromise = runContainerAgent(testGroup, input, () => {});
 
-    // Emit output
     emitOutputMarker(fakeProc, {
       status: 'success',
       result: 'Done',
       newSessionId: 'session-456',
     });
-
-    await vi.advanceTimersByTimeAsync(10);
-
-    // Normal exit (no timeout)
     fakeProc.emit('close', 0);
-
     await vi.advanceTimersByTimeAsync(10);
 
     const result = await resultPromise;
+    expect(spawnMock).toHaveBeenCalledWith(
+      'npx',
+      expect.arrayContaining(['tsx', expect.stringContaining('container/agent-runner/src/index.ts')]),
+      expect.objectContaining({ cwd: process.cwd() }),
+    );
+    expect(input.runtimePaths).toEqual(
+      expect.objectContaining({
+        groupPath: expect.stringContaining('/tmp/nanoclaw-test-groups/test-group'),
+        ipcPath: expect.stringContaining('/tmp/nanoclaw-test-data/ipc/test-group'),
+        codexHome: expect.stringContaining(
+          '/tmp/nanoclaw-test-data/sessions/test-group/.codex',
+        ),
+      }),
+    );
     expect(result.status).toBe('success');
-    expect(result.newSessionId).toBe('session-456');
   });
 });

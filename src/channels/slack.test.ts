@@ -681,6 +681,48 @@ describe('SlackChannel', () => {
         text: 'Second queued',
       });
     });
+
+    it('keeps queued messages when flush fails during connect', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+
+      await channel.sendMessage('slack:C0123456789', 'Queued message');
+      currentApp().client.chat.postMessage.mockRejectedValueOnce(
+        new Error('Slack outage'),
+      );
+
+      await expect(channel.connect()).resolves.toBeUndefined();
+
+      expect(currentApp().client.chat.postMessage).toHaveBeenCalledTimes(1);
+
+      await channel.disconnect();
+      currentApp().client.chat.postMessage.mockResolvedValue(undefined);
+      await channel.connect();
+
+      expect(currentApp().client.chat.postMessage).toHaveBeenLastCalledWith({
+        channel: 'C0123456789',
+        text: 'Queued message',
+      });
+    });
+
+    it('splits queued long messages when flushing on connect', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      const longText = 'D'.repeat(4500);
+
+      await channel.sendMessage('slack:C0123456789', longText);
+      await channel.connect();
+
+      expect(currentApp().client.chat.postMessage).toHaveBeenCalledTimes(2);
+      expect(currentApp().client.chat.postMessage).toHaveBeenNthCalledWith(1, {
+        channel: 'C0123456789',
+        text: 'D'.repeat(4000),
+      });
+      expect(currentApp().client.chat.postMessage).toHaveBeenNthCalledWith(2, {
+        channel: 'C0123456789',
+        text: 'D'.repeat(500),
+      });
+    });
   });
 
   // --- ownsJid ---

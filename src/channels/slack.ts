@@ -171,17 +171,7 @@ export class SlackChannel implements Channel {
     }
 
     try {
-      // Slack limits messages to ~4000 characters; split if needed
-      if (text.length <= MAX_MESSAGE_LENGTH) {
-        await this.app.client.chat.postMessage({ channel: channelId, text });
-      } else {
-        for (let i = 0; i < text.length; i += MAX_MESSAGE_LENGTH) {
-          await this.app.client.chat.postMessage({
-            channel: channelId,
-            text: text.slice(i, i + MAX_MESSAGE_LENGTH),
-          });
-        }
-      }
+      await this.postMessageChunks(channelId, text);
       logger.info({ jid, length: text.length }, 'Slack message sent');
     } catch (err) {
       this.outgoingQueue.push({ jid, text });
@@ -189,6 +179,20 @@ export class SlackChannel implements Channel {
         { jid, err, queueSize: this.outgoingQueue.length },
         'Failed to send Slack message, queued',
       );
+    }
+  }
+
+  private async postMessageChunks(channelId: string, text: string): Promise<void> {
+    if (text.length <= MAX_MESSAGE_LENGTH) {
+      await this.app.client.chat.postMessage({ channel: channelId, text });
+      return;
+    }
+
+    for (let i = 0; i < text.length; i += MAX_MESSAGE_LENGTH) {
+      await this.app.client.chat.postMessage({
+        channel: channelId,
+        text: text.slice(i, i + MAX_MESSAGE_LENGTH),
+      });
     }
   }
 
@@ -276,10 +280,16 @@ export class SlackChannel implements Channel {
       while (this.outgoingQueue.length > 0) {
         const item = this.outgoingQueue.shift()!;
         const channelId = item.jid.replace(/^slack:/, '');
-        await this.app.client.chat.postMessage({
-          channel: channelId,
-          text: item.text,
-        });
+        try {
+          await this.postMessageChunks(channelId, item.text);
+        } catch (err) {
+          this.outgoingQueue.unshift(item);
+          logger.warn(
+            { jid: item.jid, err, queueSize: this.outgoingQueue.length },
+            'Failed to flush queued Slack message; keeping it queued',
+          );
+          break;
+        }
         logger.info(
           { jid: item.jid, length: item.text.length },
           'Queued Slack message sent',

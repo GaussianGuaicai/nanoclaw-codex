@@ -73,6 +73,9 @@ The worker receives only a filtered set of runtime secrets from `.env`:
 
 These secrets are passed from host to worker input, then used to configure Codex. The worker does not blindly inherit the host shell environment, and Codex subprocesses are started with a minimal environment plus `CODEX_HOME`.
 
+For the main group, the project root is exposed as a per-run snapshot with `.env`
+removed, so only the filtered runtime secrets above reach the worker.
+
 Host-only secrets remain outside the worker runtime:
 
 - channel auth state under `store/`
@@ -84,7 +87,7 @@ Host-only secrets remain outside the worker runtime:
 | Capability | Main Group | Non-Main Group |
 |------------|------------|----------------|
 | Group folder | read-write | read-write |
-| Project root | read-write | none by default |
+| Project root | read-only sanitized snapshot | none by default |
 | Global memory | available via snapshot or repo access | snapshot copy |
 | Extra readonly mounts | snapshot copies | snapshot copies |
 | Extra read-write mounts | allowlist-controlled | usually blocked or forced readonly |
@@ -93,7 +96,6 @@ Host-only secrets remain outside the worker runtime:
 ## Residual Risks
 
 - Codex sandbox is not equivalent to container or VM isolation.
-- Main group can now modify the repo root directly.
 - Read-only snapshots can drift from the source between runs because they are copied, not mounted live.
 - If a writable root is approved by the host allowlist, Codex can mutate it directly.
 

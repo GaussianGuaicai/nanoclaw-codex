@@ -65,7 +65,7 @@ Per-group Codex state lives under `data/sessions/{group}/.codex`. That directory
 
 - Main group:
   - working directory: `groups/main/`
-  - extra writable root: project root
+  - read-only snapshot of project root (with `.env` stripped)
 - Non-main groups:
   - working directory: their own `groups/{folder}/`
   - no automatic access to project root

@@ -169,9 +169,8 @@ describe('container-runner worker execution', () => {
     expect(layout.codexHome).toBe(
       '/tmp/nanoclaw-test-data/sessions/test-group/.codex',
     );
-    expect(layout.writableRoots).toContain(process.cwd());
+    expect(layout.writableRoots).not.toContain(process.cwd());
     expect(layout.writableRoots).toContain('/allowed/repo');
-    expect(layout.additionalDirectories).toContain(process.cwd());
     expect(layout.additionalDirectories).toContain(
       '/tmp/nanoclaw-test-data/sessions/test-group/sandbox-context',
     );
@@ -185,6 +184,12 @@ describe('container-runner worker execution', () => {
     expect(layout.snapshotMappings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          sourcePath: process.cwd(),
+          targetPath:
+            '/tmp/nanoclaw-test-data/sessions/test-group/sandbox-context/project',
+          mode: 'snapshot',
+        }),
+        expect.objectContaining({
           sourcePath: '/tmp/nanoclaw-test-groups/global',
           mode: 'snapshot',
         }),
@@ -197,6 +202,15 @@ describe('container-runner worker execution', () => {
           mode: 'writable-root',
         }),
       ]),
+    );
+    expect(fs.cpSync).toHaveBeenCalledWith(
+      process.cwd(),
+      '/tmp/nanoclaw-test-data/sessions/test-group/sandbox-context/project',
+      { recursive: true },
+    );
+    expect(fs.rmSync).toHaveBeenCalledWith(
+      '/tmp/nanoclaw-test-data/sessions/test-group/sandbox-context/project/.env',
+      { recursive: true, force: true },
     );
     expect(fs.cpSync).toHaveBeenCalledWith(
       '/tmp/nanoclaw-test-groups/global',

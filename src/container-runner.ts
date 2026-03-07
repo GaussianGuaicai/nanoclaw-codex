@@ -82,13 +82,22 @@ function ensureGroupRuntimeDirs(groupFolder: string): {
   return { codexHome, ipcPath };
 }
 
-function copySnapshot(sourcePath: string, targetPath: string): void {
+function copySnapshot(
+  sourcePath: string,
+  targetPath: string,
+  options?: {
+    removeEntries?: string[];
+  },
+): void {
   fs.rmSync(targetPath, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
 
   const stat = fs.statSync(sourcePath);
   if (stat.isDirectory()) {
     fs.cpSync(sourcePath, targetPath, { recursive: true });
+    for (const entry of options?.removeEntries || []) {
+      fs.rmSync(path.join(targetPath, entry), { recursive: true, force: true });
+    }
     return;
   }
 
@@ -169,12 +178,9 @@ export function buildAgentExecutionLayout(
   fs.rmSync(contextRoot, { recursive: true, force: true });
 
   if (isMain) {
-    writableRoots.push(projectRoot);
-    additionalDirectories.push(projectRoot);
-    snapshotMappings.push({
+    readonlySnapshots.push({
       sourcePath: projectRoot,
-      targetPath: projectRoot,
-      mode: 'writable-root',
+      targetPath: path.join(contextRoot, 'project'),
     });
   }
 
@@ -219,7 +225,10 @@ export function buildAgentExecutionLayout(
   if (readonlySnapshots.length > 0) {
     fs.mkdirSync(contextRoot, { recursive: true });
     for (const snapshot of readonlySnapshots) {
-      copySnapshot(snapshot.sourcePath, snapshot.targetPath);
+      copySnapshot(snapshot.sourcePath, snapshot.targetPath, {
+        removeEntries:
+          snapshot.sourcePath === projectRoot ? ['.env'] : undefined,
+      });
       const instructionFile = findInstructionFile(snapshot.targetPath);
       if (instructionFile) {
         sharedInstructionFiles.push(instructionFile);

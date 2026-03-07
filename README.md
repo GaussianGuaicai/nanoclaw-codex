@@ -96,7 +96,7 @@ The core intentionally does not bundle channel implementations. Channels are add
 - macOS or Linux
 - Node.js 20+
 - [Codex CLI](https://developers.openai.com/codex/quickstart/) for `$setup`, `$customize`, and the host-side skill workflow
-- `OPENAI_API_KEY` for Codex runtime access
+- ChatGPT Plan or `OPENAI_API_KEY` for Codex runtime access
 
 Docker and Apple Container are no longer required.
 

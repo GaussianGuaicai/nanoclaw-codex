@@ -121,6 +121,16 @@ function waitForIpcMessage(
   });
 }
 
+function mergePendingMessages(prompt: string, ipcInputDir: string): string {
+  const pending = drainIpcInput(ipcInputDir);
+  if (pending.length === 0) {
+    return prompt;
+  }
+
+  log(`Draining ${pending.length} pending IPC messages into prompt`);
+  return `${prompt}\n${pending.join('\n')}`;
+}
+
 async function main(): Promise<void> {
   let containerInput: ContainerInput;
 
@@ -160,6 +170,11 @@ async function main(): Promise<void> {
         writeOutput({ status: 'success', result, newSessionId });
       },
     },
+    {
+      shouldClose: () => shouldClose(closeSentinelPath),
+      drainIpcInput: () => drainIpcInput(ipcInputDir),
+      ipcPollMs: IPC_POLL_MS,
+    },
   );
 
   let sessionId = containerInput.sessionId;
@@ -172,16 +187,18 @@ async function main(): Promise<void> {
   if (containerInput.isScheduledTask) {
     prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
   }
-  const pending = drainIpcInput(ipcInputDir);
-  if (pending.length > 0) {
-    log(`Draining ${pending.length} pending IPC messages into initial prompt`);
-    prompt += '\n' + pending.join('\n');
-  }
+  prompt = mergePendingMessages(prompt, ipcInputDir);
 
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
   try {
     while (true) {
+      if (shouldClose(closeSentinelPath)) {
+        log('Close sentinel received before query start, exiting');
+        break;
+      }
+
+      prompt = mergePendingMessages(prompt, ipcInputDir);
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
       const queryResult = await runtime.runQuery({
@@ -206,6 +223,14 @@ async function main(): Promise<void> {
       if (queryResult.closedDuringQuery) {
         log('Close sentinel consumed during query, exiting');
         break;
+      }
+
+      if (queryResult.nextPrompt != null) {
+        log(
+          `Restarting query with IPC follow-up input (${queryResult.nextPrompt.length} chars)`,
+        );
+        prompt = queryResult.nextPrompt;
+        continue;
       }
 
       // Emit session update so host can track it

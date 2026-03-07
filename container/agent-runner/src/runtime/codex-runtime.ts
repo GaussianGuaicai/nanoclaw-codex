@@ -13,6 +13,7 @@ import {
   RunQueryInput,
   RunQueryResult,
   RuntimeHooks,
+  RuntimeIpc,
 } from './types.js';
 
 const BLOCKED_ENV_VARS = new Set([
@@ -194,6 +195,10 @@ function eventSummary(event: ThreadEvent): string | null {
   return null;
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
 function archiveCodexTurn(
   prompt: string,
   response: string,
@@ -226,7 +231,10 @@ function archiveCodexTurn(
 }
 
 export class CodexRuntime implements AgentRuntime {
-  constructor(private readonly hooks: RuntimeHooks) {}
+  constructor(
+    private readonly hooks: RuntimeHooks,
+    private readonly ipc: RuntimeIpc,
+  ) {}
 
   async runQuery(input: RunQueryInput): Promise<RunQueryResult> {
     const { prompt, sessionId, resumeAt, containerInput } = input;
@@ -255,23 +263,99 @@ export class CodexRuntime implements AgentRuntime {
       ? codex.resumeThread(sessionId, threadOptions)
       : codex.startThread(threadOptions);
 
+    const abortController = new AbortController();
+    let ipcPolling = true;
+    let pollTimer: NodeJS.Timeout | null = null;
+    let closedDuringQuery = false;
+    let nextPrompt: string | undefined;
+
+    const stopIpcPolling = () => {
+      ipcPolling = false;
+      if (pollTimer) {
+        clearTimeout(pollTimer);
+        pollTimer = null;
+      }
+    };
+
+    const pollIpcDuringQuery = () => {
+      if (!ipcPolling) return;
+
+      if (this.ipc.shouldClose()) {
+        closedDuringQuery = true;
+        this.hooks.onLog('Close sentinel detected during Codex query');
+        stopIpcPolling();
+        abortController.abort();
+        return;
+      }
+
+      const messages = this.ipc.drainIpcInput();
+      if (messages.length > 0) {
+        nextPrompt = messages.join('\n');
+        this.hooks.onLog(
+          `Received ${messages.length} IPC message(s) during Codex query; interrupting turn`,
+        );
+        stopIpcPolling();
+        abortController.abort();
+        return;
+      }
+
+      pollTimer = setTimeout(pollIpcDuringQuery, this.ipc.ipcPollMs);
+    };
+
     let finalText = '';
     let newSessionId = thread.id || sessionId || undefined;
 
-    const streamed = await thread.runStreamed(prompt);
-    for await (const event of streamed.events) {
-      if (event.type === 'thread.started') {
-        newSessionId = event.thread_id;
+    pollTimer = setTimeout(pollIpcDuringQuery, this.ipc.ipcPollMs);
+
+    try {
+      const streamed = await thread.runStreamed(prompt, {
+        signal: abortController.signal,
+      });
+      for await (const event of streamed.events) {
+        if (event.type === 'thread.started') {
+          newSessionId = event.thread_id;
+        }
+
+        if (
+          event.type === 'item.completed' &&
+          event.item.type === 'agent_message'
+        ) {
+          finalText = event.item.text || finalText;
+        }
+
+        const summary = eventSummary(event);
+        if (summary) {
+          this.hooks.onLog(`[codex] ${summary}`);
+        }
+      }
+    } catch (error) {
+      if (
+        !abortController.signal.aborted ||
+        (!closedDuringQuery && nextPrompt == null && !isAbortError(error))
+      ) {
+        throw error;
       }
 
-      if (event.type === 'item.completed' && event.item.type === 'agent_message') {
-        finalText = event.item.text || finalText;
-      }
+      this.hooks.onLog('Codex query interrupted to handle IPC input');
+    } finally {
+      stopIpcPolling();
+    }
 
-      const summary = eventSummary(event);
-      if (summary) {
-        this.hooks.onLog(`[codex] ${summary}`);
-      }
+    if (closedDuringQuery) {
+      return {
+        newSessionId: newSessionId || undefined,
+        lastAssistantUuid: undefined,
+        closedDuringQuery: true,
+      };
+    }
+
+    if (nextPrompt != null) {
+      return {
+        newSessionId: newSessionId || undefined,
+        lastAssistantUuid: undefined,
+        closedDuringQuery: false,
+        nextPrompt,
+      };
     }
 
     archiveCodexTurn(prompt, finalText, runtimePaths.groupPath, newSessionId);

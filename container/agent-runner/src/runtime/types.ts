@@ -24,6 +24,12 @@ export interface RuntimeHooks {
   onResult: (result: string | null, newSessionId?: string) => void;
 }
 
+export interface RuntimeIpc {
+  shouldClose: () => boolean;
+  drainIpcInput: () => string[];
+  ipcPollMs: number;
+}
+
 export interface RunQueryInput {
   prompt: string;
   sessionId?: string;
@@ -38,6 +44,7 @@ export interface RunQueryResult {
   newSessionId?: string;
   lastAssistantUuid?: string;
   closedDuringQuery: boolean;
+  nextPrompt?: string;
 }
 
 export interface AgentRuntime {

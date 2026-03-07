@@ -4,11 +4,7 @@ import { PassThrough } from 'stream';
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
-const {
-  fsMock,
-  spawnMock,
-  validateAdditionalMounts,
-} = vi.hoisted(() => ({
+const { fsMock, spawnMock, validateAdditionalMounts } = vi.hoisted(() => ({
   fsMock: {
     existsSync: vi.fn(() => false),
     mkdirSync: vi.fn(),
@@ -117,9 +113,8 @@ function emitOutputMarker(
 
 function mockExistingPaths(paths: string[]): void {
   const resolved = new Set(paths);
-  fsMock.existsSync.mockImplementation(
-    ((inputPath: unknown) => resolved.has(String(inputPath))) as any,
-  );
+  fsMock.existsSync.mockImplementation(((inputPath: unknown) =>
+    resolved.has(String(inputPath))) as any);
 }
 
 describe('container-runner worker execution', () => {
@@ -260,13 +255,20 @@ describe('container-runner worker execution', () => {
     const result = await resultPromise;
     expect(spawnMock).toHaveBeenCalledWith(
       'npx',
-      expect.arrayContaining(['tsx', expect.stringContaining('container/agent-runner/src/index.ts')]),
+      expect.arrayContaining([
+        'tsx',
+        expect.stringContaining('container/agent-runner/src/index.ts'),
+      ]),
       expect.objectContaining({ cwd: process.cwd() }),
     );
     expect(input.runtimePaths).toEqual(
       expect.objectContaining({
-        groupPath: expect.stringContaining('/tmp/nanoclaw-test-groups/test-group'),
-        ipcPath: expect.stringContaining('/tmp/nanoclaw-test-data/ipc/test-group'),
+        groupPath: expect.stringContaining(
+          '/tmp/nanoclaw-test-groups/test-group',
+        ),
+        ipcPath: expect.stringContaining(
+          '/tmp/nanoclaw-test-data/ipc/test-group',
+        ),
         codexHome: expect.stringContaining(
           '/tmp/nanoclaw-test-data/sessions/test-group/.codex',
         ),

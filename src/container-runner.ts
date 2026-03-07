@@ -113,7 +113,11 @@ function resolveSnapshotTarget(
   containerPath: string,
 ): string {
   if (containerPath.startsWith(EXTRA_SNAPSHOT_PREFIX)) {
-    return path.join(contextRoot, 'extra', containerPath.slice(EXTRA_SNAPSHOT_PREFIX.length));
+    return path.join(
+      contextRoot,
+      'extra',
+      containerPath.slice(EXTRA_SNAPSHOT_PREFIX.length),
+    );
   }
 
   return path.join(contextRoot, path.basename(containerPath));
@@ -145,7 +149,8 @@ export function buildAgentExecutionLayout(
   const snapshotMappings: SnapshotMapping[] = [];
   const writableRoots: string[] = [];
   const additionalDirectories: string[] = [];
-  const readonlySnapshots: Array<{ sourcePath: string; targetPath: string }> = [];
+  const readonlySnapshots: Array<{ sourcePath: string; targetPath: string }> =
+    [];
 
   fs.mkdirSync(groupPath, { recursive: true });
   fs.rmSync(contextRoot, { recursive: true, force: true });

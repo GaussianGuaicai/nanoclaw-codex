@@ -16,14 +16,6 @@ import {
   RuntimeIpc,
 } from './types.js';
 
-const BLOCKED_ENV_VARS = new Set([
-  'ANTHROPIC_API_KEY',
-  'ANTHROPIC_AUTH_TOKEN',
-  'CLAUDE_CODE_OAUTH_TOKEN',
-  'OPENAI_API_KEY',
-  'OPENAI_BASE_URL',
-]);
-
 function parseBool(value: string | undefined, defaultValue: boolean): boolean {
   if (value == null) return defaultValue;
   const normalized = value.trim().toLowerCase();
@@ -64,35 +56,6 @@ function getCodexThreadOptions(input: RunQueryInput): ThreadOptions {
       (sdkEnv.NANOCLAW_CODEX_REASONING_EFFORT as ThreadOptions['modelReasoningEffort']) ||
       undefined,
   };
-}
-
-function getCodexProcessEnv(
-  sdkEnv: Record<string, string | undefined>,
-  codexHome: string,
-): Record<string, string> {
-  const passthroughKeys = new Set([
-    'PATH',
-    'HOME',
-    'SHELL',
-    'TZ',
-    'LANG',
-    'LC_ALL',
-    'TMPDIR',
-    'TERM',
-    'COLORTERM',
-  ]);
-
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(sdkEnv)) {
-    if (!value) continue;
-    if (BLOCKED_ENV_VARS.has(key)) continue;
-    if (passthroughKeys.has(key)) {
-      env[key] = value;
-    }
-  }
-
-  env.CODEX_HOME = codexHome;
-  return env;
 }
 
 function loadSharedInstructions(files: string[]): string | undefined {
@@ -143,7 +106,6 @@ function getCodexOptions(input: RunQueryInput): CodexOptions {
   return {
     ...(sdkEnv.OPENAI_API_KEY ? { apiKey: sdkEnv.OPENAI_API_KEY } : {}),
     baseUrl: sdkEnv.OPENAI_BASE_URL,
-    env: getCodexProcessEnv(sdkEnv, runtimePaths.codexHome),
     config: {
       mcp_servers: {
         nanoclaw: {
@@ -248,6 +210,12 @@ export class CodexRuntime implements AgentRuntime {
         `Codex runtime ignores resumeAt cursor for now: ${resumeAt}`,
       );
     }
+
+    // The SDK docs state that providing `env` disables inheritance from
+    // `process.env`. That breaks ChatGPT login-backed auth in CODEX_HOME on
+    // macOS, and can also drop OS-level config needed by the Codex CLI.
+    // Keep the full worker environment intact and only pin CODEX_HOME per group.
+    process.env.CODEX_HOME = runtimePaths.codexHome;
 
     if (input.sdkEnv.OPENAI_API_KEY) {
       this.hooks.onLog('Codex runtime auth mode: OPENAI_API_KEY');

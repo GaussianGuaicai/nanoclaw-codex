@@ -4,21 +4,23 @@ import { PassThrough } from 'stream';
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
-const { fsMock, spawnMock, validateAdditionalMounts } = vi.hoisted(() => ({
-  fsMock: {
-    existsSync: vi.fn(() => false),
-    mkdirSync: vi.fn(),
-    writeFileSync: vi.fn(),
-    readFileSync: vi.fn(() => ''),
-    readdirSync: vi.fn(() => []),
-    statSync: vi.fn(() => ({ isDirectory: () => true })),
-    copyFileSync: vi.fn(),
-    cpSync: vi.fn(),
-    rmSync: vi.fn(),
-  },
-  spawnMock: vi.fn(),
-  validateAdditionalMounts: vi.fn(() => []),
-}));
+const { fsMock, spawnMock, validateAdditionalMounts, readEnvFileMock } =
+  vi.hoisted(() => ({
+    fsMock: {
+      existsSync: vi.fn(() => false),
+      mkdirSync: vi.fn(),
+      writeFileSync: vi.fn(),
+      readFileSync: vi.fn(() => ''),
+      readdirSync: vi.fn(() => []),
+      statSync: vi.fn(() => ({ isDirectory: () => true })),
+      copyFileSync: vi.fn(),
+      cpSync: vi.fn(),
+      rmSync: vi.fn(),
+    },
+    spawnMock: vi.fn(),
+    validateAdditionalMounts: vi.fn(() => []),
+    readEnvFileMock: vi.fn(() => ({})),
+  }));
 
 vi.mock('./config.js', () => ({
   AGENT_MAX_OUTPUT_SIZE: 10485760,
@@ -50,6 +52,10 @@ vi.mock('fs', async () => {
 
 vi.mock('./mount-security.js', () => ({
   validateAdditionalMounts,
+}));
+
+vi.mock('./env.js', () => ({
+  readEnvFile: readEnvFileMock,
 }));
 
 function createFakeProcess() {
@@ -121,6 +127,7 @@ describe('container-runner worker execution', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    readEnvFileMock.mockReturnValue({});
     fakeProc = createFakeProcess();
     spawnMock.mockReturnValue(fakeProc);
     validateAdditionalMounts.mockReturnValue([]);
@@ -245,6 +252,105 @@ describe('container-runner worker execution', () => {
     expect(onOutput).toHaveBeenCalledWith(
       expect.objectContaining({ result: 'Here is my response' }),
     );
+  });
+
+  it('passes sanitized remote MCP servers to the worker input', async () => {
+    const onOutput = vi.fn(async () => {});
+    const stdinChunks: Buffer[] = [];
+    readEnvFileMock.mockReturnValue({
+      DOCS_API_TOKEN: 'docs-secret-token',
+    });
+    fakeProc.stdin.on('data', (chunk) => {
+      stdinChunks.push(Buffer.from(chunk));
+    });
+
+    const resultPromise = runContainerAgent(
+      {
+        ...testGroup,
+        containerConfig: {
+          mcpServers: {
+            internal_docs: {
+              type: 'http',
+              url: 'https://docs.example.com/mcp',
+              bearerTokenEnvVar: 'DOCS_API_TOKEN',
+              bypassProxy: true,
+              bridgeToStdio: true,
+            },
+            invalid_stdio: {
+              type: 'stdio' as never,
+              url: 'https://docs.example.com/mcp',
+            },
+          },
+        },
+      },
+      { ...testInput },
+      () => {},
+      onOutput,
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'ok',
+      newSessionId: 'session-remote-mcp',
+    });
+    fakeProc.emit('close', 0);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('success');
+
+    const workerInput = JSON.parse(Buffer.concat(stdinChunks).toString('utf8'));
+    expect(workerInput.remoteMcpServers).toEqual({
+      internal_docs: {
+        type: 'http',
+        url: 'https://docs.example.com/mcp',
+        headers: {
+          Authorization: 'Bearer docs-secret-token',
+        },
+      },
+    });
+    expect(workerInput.remoteMcpNoProxyHosts).toEqual(['docs.example.com']);
+    expect(workerInput.remoteMcpBridgeNames).toEqual(['internal_docs']);
+  });
+
+  it('redacts remote MCP headers before writing worker logs', async () => {
+    const resultPromise = runContainerAgent(
+      {
+        ...testGroup,
+        containerConfig: {
+          mcpServers: {
+            internal_docs: {
+              type: 'http',
+              url: 'https://docs.example.com/mcp',
+              headers: {
+                Authorization: 'Bearer secret-token',
+                'X-Api-Key': 'top-secret',
+              },
+            },
+          },
+        },
+      },
+      { ...testInput },
+      () => {},
+    );
+
+    fakeProc.stderr.push('worker failed');
+    fakeProc.emit('close', 1);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('error');
+
+    const logWrite = fsMock.writeFileSync.mock.calls.find(([filePath]) =>
+      String(filePath).includes(
+        '/tmp/nanoclaw-test-groups/test-group/logs/worker-',
+      ),
+    );
+    expect(logWrite).toBeDefined();
+
+    const logContent = String(logWrite?.[1]);
+    expect(logContent).toContain('"Authorization": "[REDACTED]"');
+    expect(logContent).toContain('"X-Api-Key": "[REDACTED]"');
+    expect(logContent).not.toContain('Bearer secret-token');
+    expect(logContent).not.toContain('top-secret');
   });
 
   it('timeout with no output resolves as error', async () => {

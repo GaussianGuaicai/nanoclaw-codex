@@ -17,7 +17,7 @@ import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { RegisteredGroup } from './types.js';
+import { RegisteredGroup, RemoteMcpServerConfig } from './types.js';
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
@@ -41,6 +41,9 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   runtimePaths?: AgentRuntimePaths;
+  remoteMcpServers?: Record<string, RemoteMcpServerConfig>;
+  remoteMcpNoProxyHosts?: string[];
+  remoteMcpBridgeNames?: string[];
   secrets?: Record<string, string>;
 }
 
@@ -64,6 +67,177 @@ export interface AgentExecutionLayout extends AgentRuntimePaths {
 interface WorkerLaunchSpec {
   command: string;
   args: string[];
+}
+
+function loadRemoteMcpEnv(
+  configuredServers?: Record<string, RemoteMcpServerConfig>,
+): Record<string, string> {
+  if (!configuredServers) return {};
+
+  const envKeys = Array.from(
+    new Set(
+      Object.values(configuredServers)
+        .map((server) => server.bearerTokenEnvVar)
+        .filter(
+          (value): value is string =>
+            typeof value === 'string' && value.length > 0,
+        ),
+    ),
+  );
+
+  return envKeys.length > 0 ? readEnvFile(envKeys) : {};
+}
+
+function resolveRemoteMcpNoProxyHosts(
+  configuredServers?: Record<string, RemoteMcpServerConfig>,
+): string[] | undefined {
+  if (!configuredServers) return undefined;
+
+  const hosts = Object.values(configuredServers).flatMap((server) => {
+    if (!server.bypassProxy) return [];
+    try {
+      const url = new URL(server.url);
+      return url.hostname ? [url.hostname] : [];
+    } catch {
+      return [];
+    }
+  });
+
+  return hosts.length > 0 ? Array.from(new Set(hosts)) : undefined;
+}
+
+function resolveRemoteMcpBridgeNames(
+  configuredServers?: Record<string, RemoteMcpServerConfig>,
+): string[] | undefined {
+  if (!configuredServers) return undefined;
+
+  const bridgeNames = Object.entries(configuredServers)
+    .filter(([, server]) => server.bridgeToStdio === true)
+    .map(([name]) => name);
+
+  return bridgeNames.length > 0 ? bridgeNames : undefined;
+}
+
+function sanitizeRemoteMcpServers(
+  configuredServers?: Record<string, RemoteMcpServerConfig>,
+  envValues: Record<string, string> = {},
+): Record<string, RemoteMcpServerConfig> | undefined {
+  if (!configuredServers) return undefined;
+
+  const sanitizedEntries = Object.entries(configuredServers).flatMap(
+    ([name, server]) => {
+      if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+        logger.warn({ name }, 'Skipping remote MCP server with invalid name');
+        return [];
+      }
+
+      if (!server || (server.type !== 'http' && server.type !== 'sse')) {
+        logger.warn(
+          { name, type: server?.type },
+          'Skipping remote MCP server with unsupported transport',
+        );
+        return [];
+      }
+
+      if (typeof server.url !== 'string') {
+        logger.warn({ name }, 'Skipping remote MCP server with missing URL');
+        return [];
+      }
+
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(server.url);
+      } catch {
+        logger.warn(
+          { name, url: server.url },
+          'Skipping remote MCP server with invalid URL',
+        );
+        return [];
+      }
+
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        logger.warn(
+          { name, url: server.url },
+          'Skipping remote MCP server with unsupported URL scheme',
+        );
+        return [];
+      }
+
+      const headers = {
+        ...(server.headers
+          ? Object.fromEntries(
+              Object.entries(server.headers).filter(
+                ([key, value]) =>
+                  typeof key === 'string' &&
+                  key.length > 0 &&
+                  typeof value === 'string',
+              ),
+            )
+          : {}),
+      };
+
+      if (server.bearerTokenEnvVar) {
+        const token = envValues[server.bearerTokenEnvVar];
+        if (!token) {
+          logger.warn(
+            { name, envVar: server.bearerTokenEnvVar },
+            'Remote MCP bearer token env var is missing',
+          );
+        } else if (!headers.Authorization) {
+          headers.Authorization = `Bearer ${token}`;
+        }
+      }
+
+      return [
+        [
+          name,
+          {
+            type: server.type,
+            url: parsedUrl.toString(),
+            ...(headers && Object.keys(headers).length > 0 ? { headers } : {}),
+          },
+        ] as const,
+      ];
+    },
+  );
+
+  return sanitizedEntries.length > 0
+    ? Object.fromEntries(sanitizedEntries)
+    : undefined;
+}
+
+function redactRemoteMcpServersForLogging(
+  configuredServers?: Record<string, RemoteMcpServerConfig>,
+): Record<string, RemoteMcpServerConfig> | undefined {
+  if (!configuredServers) return undefined;
+
+  return Object.fromEntries(
+    Object.entries(configuredServers).map(([name, server]) => [
+      name,
+      {
+        ...server,
+        ...(server.headers
+          ? {
+              headers: Object.fromEntries(
+                Object.keys(server.headers).map((key) => [key, '[REDACTED]']),
+              ),
+            }
+          : {}),
+        ...(server.bearerTokenEnvVar
+          ? {
+              bearerTokenEnvVar: server.bearerTokenEnvVar,
+            }
+          : {}),
+      },
+    ]),
+  );
+}
+
+function redactWorkerInputForLogging(input: ContainerInput): ContainerInput {
+  return {
+    ...input,
+    remoteMcpServers: redactRemoteMcpServersForLogging(input.remoteMcpServers),
+  };
 }
 
 function ensureGroupRuntimeDirs(groupFolder: string): {
@@ -104,7 +278,9 @@ function copySnapshot(
       for (const entry of fs.readdirSync(sourcePath)) {
         const entrySource = path.join(sourcePath, entry);
         if (isWithin(resolvedTarget, path.resolve(entrySource))) continue;
-        fs.cpSync(entrySource, path.join(targetPath, entry), { recursive: true });
+        fs.cpSync(entrySource, path.join(targetPath, entry), {
+          recursive: true,
+        });
       }
     } else {
       fs.cpSync(sourcePath, targetPath, { recursive: true });
@@ -316,6 +492,17 @@ export async function runContainerAgent(
 
   const layout = buildAgentExecutionLayout(group, input.isMain);
   input.runtimePaths = layout;
+  const remoteMcpEnv = loadRemoteMcpEnv(group.containerConfig?.mcpServers);
+  input.remoteMcpServers = sanitizeRemoteMcpServers(
+    group.containerConfig?.mcpServers,
+    remoteMcpEnv,
+  );
+  input.remoteMcpNoProxyHosts = resolveRemoteMcpNoProxyHosts(
+    group.containerConfig?.mcpServers,
+  );
+  input.remoteMcpBridgeNames = resolveRemoteMcpBridgeNames(
+    group.containerConfig?.mcpServers,
+  );
 
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const executionName = `nanoclaw-${safeName}-${Date.now()}`;
@@ -515,7 +702,7 @@ export async function runContainerAgent(
       if (isVerbose || code !== 0) {
         logLines.push(
           '=== Input ===',
-          JSON.stringify(input, null, 2),
+          JSON.stringify(redactWorkerInputForLogging(input), null, 2),
           '',
           '=== Worker Launch ===',
           `${launch.command} ${launch.args.join(' ')}`,

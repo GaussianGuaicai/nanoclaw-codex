@@ -6,6 +6,16 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  remoteMcpServers?: Record<
+    string,
+    {
+      type: 'http' | 'sse';
+      url: string;
+      headers?: Record<string, string>;
+    }
+  >;
+  remoteMcpNoProxyHosts?: string[];
+  remoteMcpBridgeNames?: string[];
   runtimePaths?: {
     groupPath: string;
     ipcPath: string;

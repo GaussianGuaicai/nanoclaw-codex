@@ -4,6 +4,15 @@ export interface AdditionalMount {
   readonly?: boolean; // Default: true for safety
 }
 
+export interface RemoteMcpServerConfig {
+  type: 'http' | 'sse';
+  url: string;
+  headers?: Record<string, string>;
+  bearerTokenEnvVar?: string;
+  bypassProxy?: boolean;
+  bridgeToStdio?: boolean;
+}
+
 /**
  * Mount Allowlist - Security configuration for additional mounts
  * This file should be stored at ~/.config/nanoclaw/mount-allowlist.json
@@ -30,6 +39,7 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  mcpServers?: Record<string, RemoteMcpServerConfig>;
 }
 
 export interface RegisteredGroup {

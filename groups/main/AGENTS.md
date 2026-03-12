@@ -39,6 +39,7 @@ When working as a sub-agent or teammate, only use `send_message` if instructed t
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
 
 When you learn something important:
+
 - Create files for structured data (e.g., `customers.md`, `preferences.md`)
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
@@ -46,10 +47,11 @@ When you learn something important:
 ## WhatsApp Formatting (and other messaging apps)
 
 Do NOT use markdown headings (##) in WhatsApp messages. Only use:
-- *Bold* (single asterisks) (NEVER **double asterisks**)
+
+- _Bold_ (single asterisks) (NEVER **double asterisks**)
 - _Italic_ (underscores)
 - • Bullets (bullet points)
-- ```Code blocks``` (triple backticks)
+- `Code blocks` (triple backticks)
 
 Keep messages clean and readable for WhatsApp.
 
@@ -64,6 +66,7 @@ This is the **main channel**, which has elevated privileges.
 Main runs in `groups/main/` and also has direct writable access to the repo root.
 
 Key paths from the main group runtime:
+
 - `../../store/messages.db` - SQLite database
 - `../../groups/` - All group folders
 - `../../data/ipc/main/available_groups.json` - Available groups snapshot
@@ -129,6 +132,7 @@ Groups are registered in the SQLite `registered_groups` table:
 ```
 
 Fields:
+
 - **Key**: The chat JID (unique identifier — WhatsApp, Telegram, Slack, Discord, etc.)
 - **name**: Display name for the group
 - **folder**: Channel-prefixed folder name under `groups/` for this group's files and memory
@@ -148,10 +152,12 @@ Fields:
 1. Query the database to find the group's JID
 2. Use the `register_group` MCP tool with the JID, name, folder, and trigger
 3. Optionally include `containerConfig` for additional mounts
+   or remote MCP servers
 4. The group folder is created automatically under `groups/{folder-name}/`
 5. Optionally create an initial `AGENTS.md` for the group
 
 Folder naming convention — channel prefix with underscore separator:
+
 - WhatsApp "Family Chat" → `whatsapp_family-chat`
 - Telegram "Dev Team" → `telegram_dev-team`
 - Discord "General" → `discord_general`
@@ -161,8 +167,10 @@ Folder naming convention — channel prefix with underscore separator:
 #### Adding Additional Directories for a Group
 
 Groups can still use `containerConfig` for extra paths. The host now interprets it as:
+
 - `readonly !== false`: copy a snapshot into the group's sandbox context
 - `readonly === false`: add a writable root if the external allowlist permits it
+- `mcpServers`: add remote MCP servers over `http` or `sse`
 
 Example:
 
@@ -180,7 +188,44 @@ Example:
           "containerPath": "webapp",
           "readonly": false
         }
-      ]
+      ],
+      "mcpServers": {
+        "internal_docs": {
+          "type": "http",
+          "url": "https://docs.example.com/mcp"
+        }
+      }
+    }
+  }
+}
+```
+
+Remote MCP notes:
+
+- Only `http` and `sse` transports are accepted from group config
+- Server names may contain letters, numbers, `_`, and `-`
+- Headers must be string-to-string pairs
+- `bearerTokenEnvVar` can be used to build `Authorization: Bearer ...` from a host `.env` secret
+- `bypassProxy: true` adds the MCP host to `NO_PROXY` for the worker/Codex process
+- `bridgeToStdio: true` runs the remote MCP through a local stdio bridge instead of Codex's built-in remote HTTP transport
+
+Example with only a remote MCP server:
+
+```json
+{
+  "telegram:123456789": {
+    "name": "Ops Room",
+    "folder": "telegram_ops-room",
+    "trigger": "@Assistant",
+    "added_at": "2026-03-07T11:13:30.964Z",
+    "containerConfig": {
+      "mcpServers": {
+        "internal_docs": {
+          "type": "http",
+          "url": "https://docs.example.com/mcp",
+          "bearerTokenEnvVar": "DOCS_API_TOKEN"
+        }
+      }
     }
   }
 }
@@ -215,6 +260,7 @@ If the user wants to set up an allowlist, edit `~/.config/nanoclaw/sender-allowl
 ```
 
 Notes:
+
 - Your own messages (`is_from_me`) explicitly bypass the allowlist in trigger checks. Bot messages are filtered out by the database query before trigger evaluation, so they never reach the allowlist.
 - If the config file doesn't exist or is invalid, all senders are allowed (fail-open)
 - The config file is on the host at `~/.config/nanoclaw/sender-allowlist.json`
@@ -241,6 +287,7 @@ You can read and write to `../global/AGENTS.md` for facts that should apply to a
 ## Scheduling for Other Groups
 
 When scheduling tasks for other groups, use the `target_group_jid` parameter with the group's JID from the `registered_groups` table:
+
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.

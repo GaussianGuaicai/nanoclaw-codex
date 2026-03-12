@@ -2,11 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'path';
 import { pathToFileURL } from 'url';
 
-const {
-  startThreadMock,
-  resumeThreadMock,
-  codexCtorMock,
-} = vi.hoisted(() => ({
+const { startThreadMock, resumeThreadMock, codexCtorMock } = vi.hoisted(() => ({
   startThreadMock: vi.fn(),
   resumeThreadMock: vi.fn(),
   codexCtorMock: vi.fn(),
@@ -55,6 +51,32 @@ async function loadCodexRuntime(): Promise<
   return mod.CodexRuntime;
 }
 
+async function loadCodexRuntimeModule(): Promise<{
+  getCodexOptions: (input: any) => any;
+  mergeNoProxyHosts: (
+    existingValue: string | undefined,
+    hosts: string[] | undefined,
+  ) => string | undefined;
+}> {
+  const moduleUrl = pathToFileURL(
+    path.join(
+      process.cwd(),
+      'container',
+      'agent-runner',
+      'src',
+      'runtime',
+      'codex-runtime.ts',
+    ),
+  ).href;
+  return (await import(moduleUrl)) as {
+    getCodexOptions: (input: any) => any;
+    mergeNoProxyHosts: (
+      existingValue: string | undefined,
+      hosts: string[] | undefined,
+    ) => string | undefined;
+  };
+}
+
 function createAbortableThread(threadId = 'thread-1') {
   return {
     thread: {
@@ -86,7 +108,7 @@ function createAbortableThread(threadId = 'thread-1') {
   };
 }
 
-function createRunQueryInput() {
+function createRunQueryInput(): any {
   return {
     prompt: 'hello',
     sessionId: 'existing-session',
@@ -123,7 +145,6 @@ describe('CodexRuntime IPC interruption', () => {
   it('interrupts the active turn when new IPC input arrives', async () => {
     const CodexRuntime = await loadCodexRuntime();
     const { thread } = createAbortableThread();
-    startThreadMock.mockReturnValue(thread);
     resumeThreadMock.mockReturnValue(thread);
 
     const onLog = vi.fn();
@@ -182,5 +203,55 @@ describe('CodexRuntime IPC interruption', () => {
       }),
     );
     expect(onResult).not.toHaveBeenCalled();
+  });
+
+  it('merges configured remote MCP servers into the Codex config', async () => {
+    const { getCodexOptions } = await loadCodexRuntimeModule();
+    const input = createRunQueryInput();
+    input.containerInput.remoteMcpServers = {
+      docs: {
+        type: 'http',
+        url: 'https://docs.example.com/mcp',
+        headers: {
+          Authorization: 'Bearer test-token',
+        },
+      },
+    };
+    input.containerInput.remoteMcpBridgeNames = ['docs'];
+
+    expect(getCodexOptions(input)).toEqual(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          mcp_servers: expect.objectContaining({
+            nanoclaw: expect.any(Object),
+            docs: {
+              command: expect.any(String),
+              args: expect.any(Array),
+              env: {
+                NANOCLAW_REMOTE_MCP_NAME: 'docs',
+                NANOCLAW_REMOTE_MCP_URL: 'https://docs.example.com/mcp',
+                NANOCLAW_REMOTE_MCP_HEADERS_JSON: JSON.stringify({
+                  Authorization: 'Bearer test-token',
+                }),
+              },
+            },
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('merges remote MCP hosts into NO_PROXY', async () => {
+    const { mergeNoProxyHosts } = await loadCodexRuntimeModule();
+
+    expect(
+      mergeNoProxyHosts('127.0.0.1,localhost', [
+        'docs.example.com',
+        '198.51.100.10',
+      ]),
+    ).toBe('127.0.0.1,localhost,docs.example.com,198.51.100.10');
+    expect(mergeNoProxyHosts(undefined, ['docs.example.com'])).toBe(
+      'docs.example.com',
+    );
   });
 });

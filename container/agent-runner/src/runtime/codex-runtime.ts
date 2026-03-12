@@ -77,7 +77,68 @@ function loadSharedInstructions(files: string[]): string | undefined {
   return sections.length > 0 ? sections.join('\n\n') : undefined;
 }
 
-function getCodexOptions(input: RunQueryInput): CodexOptions {
+function resolveHttpMcpBridgeLaunch(): { command: string; args: string[] } {
+  const bridgeDist = path.join(
+    process.cwd(),
+    'container',
+    'agent-runner',
+    'dist',
+    'http-mcp-bridge.js',
+  );
+  if (fs.existsSync(bridgeDist)) {
+    return {
+      command: process.execPath,
+      args: [bridgeDist],
+    };
+  }
+
+  const bridgeSrc = path.join(
+    process.cwd(),
+    'container',
+    'agent-runner',
+    'src',
+    'http-mcp-bridge.ts',
+  );
+  const localTsx = path.join(process.cwd(), 'node_modules', '.bin', 'tsx');
+  if (fs.existsSync(localTsx)) {
+    return {
+      command: localTsx,
+      args: [bridgeSrc],
+    };
+  }
+
+  return {
+    command: 'npx',
+    args: ['tsx', bridgeSrc],
+  };
+}
+
+export function mergeNoProxyHosts(
+  existingValue: string | undefined,
+  hosts: string[] | undefined,
+): string | undefined {
+  const normalizedHosts =
+    hosts?.map((value) => value.trim()).filter((value) => value.length > 0) ||
+    [];
+  if (normalizedHosts.length === 0) {
+    return existingValue;
+  }
+
+  const merged = new Set(
+    (existingValue || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0),
+  );
+
+  for (const host of normalizedHosts) {
+    merged.add(host);
+  }
+
+  return Array.from(merged).join(',');
+}
+
+export function getCodexOptions(input: RunQueryInput): CodexOptions {
   const { sdkEnv, containerInput } = input;
   const runtimePaths = containerInput.runtimePaths;
   if (!runtimePaths) {
@@ -85,40 +146,67 @@ function getCodexOptions(input: RunQueryInput): CodexOptions {
   }
 
   const skillsDir = path.join(process.cwd(), 'container', 'skills');
-  const skillConfigs =
-    fs.existsSync(skillsDir)
-      ? fs
-          .readdirSync(skillsDir)
-          .map((entry) => path.join(skillsDir, entry))
-          .filter((entry) => {
-            try {
-              return fs.statSync(entry).isDirectory();
-            } catch {
-              return false;
-            }
-          })
-          .map((entry) => ({ path: entry, enabled: true }))
-      : [];
+  const skillConfigs = fs.existsSync(skillsDir)
+    ? fs
+        .readdirSync(skillsDir)
+        .map((entry) => path.join(skillsDir, entry))
+        .filter((entry) => {
+          try {
+            return fs.statSync(entry).isDirectory();
+          } catch {
+            return false;
+          }
+        })
+        .map((entry) => ({ path: entry, enabled: true }))
+    : [];
   const sharedInstructions = loadSharedInstructions(
     runtimePaths.sharedInstructionFiles,
   );
+  const bridgeLaunch = resolveHttpMcpBridgeLaunch();
+  const bridgeNames = new Set(containerInput.remoteMcpBridgeNames || []);
+  const remoteMcpServers = Object.fromEntries(
+    Object.entries(containerInput.remoteMcpServers || {}).map(
+      ([name, server]) => {
+        if (!bridgeNames.has(name)) {
+          return [name, server];
+        }
+
+        return [
+          name,
+          {
+            command: bridgeLaunch.command,
+            args: bridgeLaunch.args,
+            env: {
+              NANOCLAW_REMOTE_MCP_NAME: name,
+              NANOCLAW_REMOTE_MCP_URL: server.url,
+              NANOCLAW_REMOTE_MCP_HEADERS_JSON: JSON.stringify(
+                server.headers || {},
+              ),
+            },
+          },
+        ];
+      },
+    ),
+  );
+  const mcpServers = {
+    nanoclaw: {
+      command: input.mcpServerCommand,
+      args: input.mcpServerArgs,
+      env: {
+        NANOCLAW_CHAT_JID: containerInput.chatJid,
+        NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+        NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+        NANOCLAW_IPC_PATH: runtimePaths.ipcPath,
+      },
+    },
+    ...remoteMcpServers,
+  };
 
   return {
     ...(sdkEnv.OPENAI_API_KEY ? { apiKey: sdkEnv.OPENAI_API_KEY } : {}),
     baseUrl: sdkEnv.OPENAI_BASE_URL,
     config: {
-      mcp_servers: {
-        nanoclaw: {
-          command: input.mcpServerCommand,
-          args: input.mcpServerArgs,
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-            NANOCLAW_IPC_PATH: runtimePaths.ipcPath,
-          },
-        },
-      },
+      mcp_servers: mcpServers,
       sandbox_workspace_write: {
         writable_roots: runtimePaths.writableRoots,
         network_access: parseBool(sdkEnv.NANOCLAW_CODEX_NETWORK_ACCESS, true),
@@ -216,6 +304,17 @@ export class CodexRuntime implements AgentRuntime {
     // macOS, and can also drop OS-level config needed by the Codex CLI.
     // Keep the full worker environment intact and only pin CODEX_HOME per group.
     process.env.CODEX_HOME = runtimePaths.codexHome;
+    const mergedNoProxy = mergeNoProxyHosts(
+      process.env.NO_PROXY || process.env.no_proxy,
+      containerInput.remoteMcpNoProxyHosts,
+    );
+    if (mergedNoProxy) {
+      process.env.NO_PROXY = mergedNoProxy;
+      process.env.no_proxy = mergedNoProxy;
+      this.hooks.onLog(
+        `Applied NO_PROXY hosts for remote MCP: ${mergedNoProxy}`,
+      );
+    }
 
     if (input.sdkEnv.OPENAI_API_KEY) {
       this.hooks.onLog('Codex runtime auth mode: OPENAI_API_KEY');

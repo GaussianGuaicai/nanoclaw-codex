@@ -43,6 +43,8 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
+import { runSingleTurnAgentTask } from './agent-task-runner.js';
+import { WebSocketSourceManager } from './event-sources/manager.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -58,6 +60,7 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+let webSocketSourceManager: WebSocketSourceManager | null = null;
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -329,6 +332,81 @@ async function runAgent(
   }
 }
 
+function enqueueWebSocketEventTask(params: {
+  connectionName: string;
+  subscriptionId: string;
+  targetJid: string;
+  prompt: string;
+  contextMode: 'group' | 'isolated';
+  deliverOutput: boolean;
+}): void {
+  const group = registeredGroups[params.targetJid];
+  if (!group) {
+    logger.warn(
+      { targetJid: params.targetJid, subscriptionId: params.subscriptionId },
+      'Skipping WS event task for unknown target group',
+    );
+    return;
+  }
+
+  const taskId = `ws-${params.subscriptionId}-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+
+  queue.enqueueTask(params.targetJid, taskId, async () => {
+    const execution = await runSingleTurnAgentTask(
+      group,
+      {
+        chatJid: params.targetJid,
+        prompt: params.prompt,
+        contextMode: params.contextMode,
+        deliverOutput: params.deliverOutput,
+        assistantName: ASSISTANT_NAME,
+      },
+      {
+        getSessions: () => sessions,
+        onProcess: (groupJid, proc, executionName, groupFolder) =>
+          queue.registerProcess(groupJid, proc, executionName, groupFolder),
+        queue,
+        sendMessage: async (jid, rawText) => {
+          const channel = findChannel(channels, jid);
+          if (!channel) {
+            logger.warn(
+              { jid },
+              'No channel owns JID, cannot send WS task output',
+            );
+            return;
+          }
+          const text = formatOutbound(rawText);
+          if (text) await channel.sendMessage(jid, text);
+        },
+      },
+    );
+
+    if (execution.status === 'error') {
+      logger.error(
+        {
+          connection: params.connectionName,
+          subscriptionId: params.subscriptionId,
+          targetJid: params.targetJid,
+          error: execution.error,
+        },
+        'WS event task failed',
+      );
+      return;
+    }
+
+    logger.info(
+      {
+        connection: params.connectionName,
+        subscriptionId: params.subscriptionId,
+        targetJid: params.targetJid,
+      },
+      'WS event task completed',
+    );
+  });
+}
+
 async function startMessageLoop(): Promise<void> {
   if (messageLoopRunning) {
     logger.debug('Message loop already running, skipping duplicate start');
@@ -457,6 +535,9 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
+    if (webSocketSourceManager) {
+      await webSocketSourceManager.stop();
+    }
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
   };
@@ -551,6 +632,20 @@ async function main(): Promise<void> {
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
   });
+  webSocketSourceManager = new WebSocketSourceManager({
+    getRegisteredGroups: () => registeredGroups,
+    runEventTask: async ({ connectionName, subscription, prompt }) => {
+      enqueueWebSocketEventTask({
+        connectionName,
+        subscriptionId: subscription.id,
+        targetJid: subscription.targetJid,
+        prompt,
+        contextMode: subscription.contextMode || 'isolated',
+        deliverOutput: subscription.deliverOutput === true,
+      });
+    },
+  });
+  await webSocketSourceManager.start();
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {

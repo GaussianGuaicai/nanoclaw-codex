@@ -1,0 +1,59 @@
+import fs from 'fs';
+import path from 'path';
+
+import { LOGS_DIR } from '../config.js';
+import { logger } from '../logger.js';
+import {
+  NormalizedWebSocketEvent,
+  WebSocketSubscriptionConfig,
+} from '../types.js';
+
+export interface WebSocketEventLogEntry {
+  receivedAt: string;
+  provider: string;
+  connectionName: string;
+  subscriptionId: string;
+  targetJid: string;
+  eventType: string;
+  status: 'filtered' | 'cooldown' | 'dispatched' | 'dispatch_error';
+  error?: string;
+  payload: Record<string, unknown>;
+}
+
+export function getWebSocketEventLogPath(provider: string): string {
+  const safeProvider = provider
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  const providerSegment = safeProvider || 'unknown';
+  return path.join(LOGS_DIR, `websocket-events-${providerSegment}.log`);
+}
+
+export function appendWebSocketEventLog(
+  event: NormalizedWebSocketEvent,
+  subscription: WebSocketSubscriptionConfig,
+  status: WebSocketEventLogEntry['status'],
+  error?: string,
+): void {
+  const logPath = getWebSocketEventLogPath(event.provider);
+  const entry: WebSocketEventLogEntry = {
+    receivedAt: new Date().toISOString(),
+    provider: event.provider,
+    connectionName: event.connectionName,
+    subscriptionId: subscription.id,
+    targetJid: subscription.targetJid,
+    eventType: event.eventType,
+    status,
+    ...(error ? { error } : {}),
+    payload: event.payload,
+  };
+
+  try {
+    fs.mkdirSync(path.dirname(logPath), {
+      recursive: true,
+    });
+    fs.appendFileSync(logPath, `${JSON.stringify(entry)}\n`, 'utf-8');
+  } catch (err) {
+    logger.warn({ err, path: logPath }, 'Failed to append WebSocket event log');
+  }
+}

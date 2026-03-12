@@ -1,0 +1,49 @@
+{
+  "connections": {
+    "ha_main": {
+      "provider": "home_assistant",
+      "urlEnvVar": "HOME_ASSISTANT_URL",
+      "tokenEnvVar": "HASS_ACCESS_TOKEN",
+      "heartbeatIntervalMs": 30000,
+      "requestTimeoutMs": 10000,
+      "reconnect": {
+        "initialDelayMs": 1000,
+        "maxDelayMs": 30000
+      }
+    }
+  },
+  "subscriptions": [
+    {
+      "id": "front-door-open",
+      "connection": "ha_main",
+      "kind": "events",
+      "eventType": "state_changed",
+      "filters": [
+        {
+          "path": "data.old_state.state",
+          "op": "neq",
+          "valueFromPath": "data.new_state.state"
+        },
+        {
+          "path": "data.entity_id",
+          "op": "not_starts_with",
+          "value": "button."
+        },
+        {
+          "path": "data.entity_id",
+          "op": "not_starts_with",
+          "value": "camera."
+        }
+      ],
+      "match": {
+        "data.entity_id": "binary_sensor.front_door",
+        "data.new_state.state": "on"
+      },
+      "targetJid": "slack:C0123456789",
+      "promptTemplate": "Home Assistant event {{event_type}} fired at {{time_fired}}.\nEvaluate the event payload and decide whether to notify or trigger follow-up automation.\n\n{{event_json}}",
+      "contextMode": "isolated",
+      "deliverOutput": false,
+      "cooldownMs": 10000
+    }
+  ]
+}

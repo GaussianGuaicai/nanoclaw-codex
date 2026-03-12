@@ -22,7 +22,13 @@ async function loadResolveMcpServerLaunch(): Promise<
   }
 > {
   const moduleUrl = pathToFileURL(
-    path.join(process.cwd(), 'container', 'agent-runner', 'src', 'mcp-launch.ts'),
+    path.join(
+      process.cwd(),
+      'container',
+      'agent-runner',
+      'src',
+      'mcp-launch.ts',
+    ),
   ).href;
   const mod = (await import(moduleUrl)) as {
     resolveMcpServerLaunch: (

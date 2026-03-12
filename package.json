@@ -13,6 +13,10 @@
     "setup:worker": "tsx setup/index.ts --step worker",
     "setup:service": "tsx setup/index.ts --step service",
     "setup:verify": "tsx setup/index.ts --step verify",
+    "service:status": "bash scripts/service-control.sh status",
+    "service:start": "bash scripts/service-control.sh start",
+    "service:stop": "bash scripts/service-control.sh stop",
+    "service:restart": "bash scripts/service-control.sh restart",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:fix": "prettier --write \"src/**/*.ts\"",
@@ -29,6 +33,7 @@
     "cron-parser": "^5.5.0",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
+    "ws": "^8.19.0",
     "yaml": "^2.8.2",
     "zod": "^4.3.6"
   },

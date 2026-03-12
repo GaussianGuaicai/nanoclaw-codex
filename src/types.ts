@@ -115,3 +115,69 @@ export type OnChatMetadata = (
   channel?: string,
   isGroup?: boolean,
 ) => void;
+
+export type EventExecutionContextMode = 'group' | 'isolated';
+export type WebSocketProviderName = string;
+
+export type WebSocketMatchValue = string | number | boolean | null;
+export type WebSocketFilterOperator =
+  | 'eq'
+  | 'neq'
+  | 'in'
+  | 'not_in'
+  | 'starts_with'
+  | 'not_starts_with'
+  | 'exists'
+  | 'not_exists';
+
+export interface WebSocketFilterRule {
+  path: string;
+  op: WebSocketFilterOperator;
+  value?: WebSocketMatchValue | WebSocketMatchValue[];
+  valueFromPath?: string;
+}
+
+export interface WebSocketConnectionConfig {
+  provider: WebSocketProviderName;
+  urlEnvVar: string;
+  tokenEnvVar: string;
+  heartbeatIntervalMs?: number;
+  requestTimeoutMs?: number;
+  reconnect?: {
+    initialDelayMs?: number;
+    maxDelayMs?: number;
+  };
+  features?: {
+    coalesceMessages?: boolean;
+  };
+}
+
+export interface WebSocketSubscriptionConfig {
+  id: string;
+  connection: string;
+  kind: 'events';
+  eventType: string;
+  filters?: WebSocketFilterRule[];
+  match?: Record<string, WebSocketMatchValue | WebSocketMatchValue[]>;
+  logFilteredEvents?: boolean;
+  logCooldownEvents?: boolean;
+  targetJid: string;
+  promptTemplate: string;
+  contextMode?: EventExecutionContextMode;
+  deliverOutput?: boolean;
+  cooldownMs?: number;
+}
+
+export interface WebSocketSourcesConfig {
+  connections: Record<string, WebSocketConnectionConfig>;
+  subscriptions: WebSocketSubscriptionConfig[];
+}
+
+export interface NormalizedWebSocketEvent {
+  connectionName: string;
+  subscriptionId: string;
+  provider: WebSocketProviderName;
+  eventType: string;
+  occurredAt: string;
+  payload: Record<string, unknown>;
+}

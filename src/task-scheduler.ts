@@ -3,13 +3,8 @@ import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
 import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { runSingleTurnAgentTask } from './agent-task-runner.js';
 import {
-  ContainerOutput,
-  runContainerAgent,
-  writeTasksSnapshot,
-} from './container-runner.js';
-import {
-  getAllTasks,
   getDueTasks,
   getTaskById,
   logTaskRun,
@@ -129,92 +124,34 @@ async function runTask(
     return;
   }
 
-  // Update tasks snapshot for the worker to read (filtered by group)
-  const isMain = group.isMain === true;
-  const tasks = getAllTasks();
-  writeTasksSnapshot(
-    task.group_folder,
-    isMain,
-    tasks.map((t) => ({
-      id: t.id,
-      groupFolder: t.group_folder,
-      prompt: t.prompt,
-      schedule_type: t.schedule_type,
-      schedule_value: t.schedule_value,
-      status: t.status,
-      next_run: t.next_run,
-    })),
+  const execution = await runSingleTurnAgentTask(
+    group,
+    {
+      chatJid: task.chat_jid,
+      prompt: task.prompt,
+      contextMode: task.context_mode,
+      deliverOutput: true,
+      isScheduledTask: true,
+      assistantName: ASSISTANT_NAME,
+    },
+    {
+      getSessions: deps.getSessions,
+      onProcess: deps.onProcess,
+      queue: deps.queue,
+      sendMessage: deps.sendMessage,
+    },
   );
 
-  let result: string | null = null;
-  let error: string | null = null;
+  const result = execution.result;
+  const error = execution.error;
 
-  // For group context mode, use the group's current session
-  const sessions = deps.getSessions();
-  const sessionId =
-    task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
-
-  // After the task produces a result, close the worker promptly.
-  // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
-  // query loop to time out. A short delay handles any final MCP calls.
-  const TASK_CLOSE_DELAY_MS = 10000;
-  let closeTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const scheduleClose = () => {
-    if (closeTimer) return; // already scheduled
-    closeTimer = setTimeout(() => {
-      logger.debug({ taskId: task.id }, 'Closing task worker after result');
-      deps.queue.closeStdin(task.chat_jid);
-    }, TASK_CLOSE_DELAY_MS);
-  };
-
-  try {
-    const output = await runContainerAgent(
-      group,
-      {
-        prompt: task.prompt,
-        sessionId,
-        groupFolder: task.group_folder,
-        chatJid: task.chat_jid,
-        isMain,
-        isScheduledTask: true,
-        assistantName: ASSISTANT_NAME,
-      },
-      (proc, executionName) =>
-        deps.onProcess(task.chat_jid, proc, executionName, task.group_folder),
-      async (streamedOutput: ContainerOutput) => {
-        if (streamedOutput.result) {
-          result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
-          scheduleClose();
-        }
-        if (streamedOutput.status === 'success') {
-          deps.queue.notifyIdle(task.chat_jid);
-        }
-        if (streamedOutput.status === 'error') {
-          error = streamedOutput.error || 'Unknown error';
-        }
-      },
-    );
-
-    if (closeTimer) clearTimeout(closeTimer);
-
-    if (output.status === 'error') {
-      error = output.error || 'Unknown error';
-    } else if (output.result) {
-      // Result was already forwarded to the user via the streaming callback above
-      result = output.result;
-    }
-
+  if (error) {
+    logger.error({ taskId: task.id, error }, 'Task failed');
+  } else {
     logger.info(
       { taskId: task.id, durationMs: Date.now() - startTime },
       'Task completed',
     );
-  } catch (err) {
-    if (closeTimer) clearTimeout(closeTimer);
-    error = err instanceof Error ? err.message : String(err);
-    logger.error({ taskId: task.id, error }, 'Task failed');
   }
 
   const durationMs = Date.now() - startTime;

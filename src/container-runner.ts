@@ -112,7 +112,9 @@ function resolveRemoteMcpBridgeNames(
   if (!configuredServers) return undefined;
 
   const bridgeNames = Object.entries(configuredServers)
-    .filter(([, server]) => server.bridgeToStdio === true)
+    .filter(
+      ([, server]) => server.bridgeToStdio === true && server.type === 'http',
+    )
     .map(([name]) => name);
 
   return bridgeNames.length > 0 ? bridgeNames : undefined;

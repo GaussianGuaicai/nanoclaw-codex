@@ -276,6 +276,11 @@ describe('container-runner worker execution', () => {
               bypassProxy: true,
               bridgeToStdio: true,
             },
+            updates_feed: {
+              type: 'sse',
+              url: 'https://updates.example.com/mcp',
+              bridgeToStdio: true,
+            },
             invalid_stdio: {
               type: 'stdio' as never,
               url: 'https://docs.example.com/mcp',
@@ -306,6 +311,10 @@ describe('container-runner worker execution', () => {
         headers: {
           Authorization: 'Bearer docs-secret-token',
         },
+      },
+      updates_feed: {
+        type: 'sse',
+        url: 'https://updates.example.com/mcp',
       },
     });
     expect(workerInput.remoteMcpNoProxyHosts).toEqual(['docs.example.com']);

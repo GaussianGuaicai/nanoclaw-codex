@@ -101,6 +101,11 @@ export class WebSocketSourceManager {
             return;
           }
 
+          if (subscription.runTask === false) {
+            appendWebSocketEventLog(event, subscription, 'logged');
+            return;
+          }
+
           const prompt = renderPromptTemplate(
             subscription.promptTemplate,
             event,

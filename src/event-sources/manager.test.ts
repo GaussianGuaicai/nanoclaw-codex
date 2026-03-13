@@ -285,6 +285,69 @@ describe('WebSocketSourceManager', () => {
     );
   });
 
+  it('can log events without running tasks', async () => {
+    loadConfigMock.mockReturnValue({
+      connections: {
+        ha_main: {
+          name: 'ha_main',
+          provider: 'home_assistant',
+          url: 'http://127.0.0.1:8123',
+          token: 'secret',
+          urlEnvVar: 'TEST_HA_URL',
+          tokenEnvVar: 'TEST_HA_TOKEN',
+        },
+      },
+      subscriptions: [
+        {
+          id: 'log-only',
+          connection: 'ha_main',
+          kind: 'events',
+          eventType: 'state_changed',
+          runTask: false,
+          targetJid: 'slack:C123',
+          promptTemplate: 'Handle {{event_type}}',
+        },
+      ],
+    });
+
+    const runEventTask = vi.fn().mockResolvedValue(undefined);
+    const manager = new WebSocketSourceManager({
+      getRegisteredGroups: () => ({
+        'slack:C123': {
+          name: 'Ops',
+          folder: 'slack_ops',
+          trigger: '@Andy',
+          added_at: '2026-03-12T00:00:00.000Z',
+        },
+      }),
+      runEventTask,
+    });
+
+    await manager.start();
+
+    const subscription = connectionInstances[0].options.subscriptions[0];
+    const event: NormalizedWebSocketEvent = {
+      connectionName: 'ha_main',
+      subscriptionId: 'log-only',
+      provider: 'home_assistant',
+      eventType: 'state_changed',
+      occurredAt: '2026-03-12T08:00:00.000Z',
+      payload: {
+        event_type: 'state_changed',
+        data: { entity_id: 'sensor.temperature' },
+      },
+    };
+
+    await connectionInstances[0].options.onEvent(event, subscription);
+
+    expect(runEventTask).not.toHaveBeenCalled();
+    expect(appendEventLogMock).toHaveBeenCalledWith(
+      event,
+      subscription,
+      'logged',
+    );
+  });
+
   it('skips unsupported providers without constructing a connection', async () => {
     loadConfigMock.mockReturnValue({
       connections: {

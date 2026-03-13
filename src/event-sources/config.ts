@@ -99,6 +99,7 @@ const subscriptionSchema = z.object({
     .optional(),
   logFilteredEvents: z.boolean().optional(),
   logCooldownEvents: z.boolean().optional(),
+  runTask: z.boolean().optional(),
   targetJid: z.string().min(1),
   promptTemplate: z.string().min(1),
   contextMode: z.enum(['group', 'isolated']).optional(),

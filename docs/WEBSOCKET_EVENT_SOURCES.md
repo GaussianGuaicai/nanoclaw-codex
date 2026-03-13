@@ -52,6 +52,7 @@ Use `config-examples/websocket-sources.home-assistant.json` as a Home Assistant-
 - `match`: optional exact-match filters using dot-paths relative to the normalized provider payload
 - `logFilteredEvents`: optional boolean; defaults to `false`
 - `logCooldownEvents`: optional boolean; defaults to `false`
+- `runTask`: optional boolean; defaults to `true`. Set to `false` for log-only subscriptions.
 - `targetJid`: registered group/chat JID that owns the task context
 - `promptTemplate`: required task prompt template
 - `contextMode`: `"isolated"` or `"group"`
@@ -95,3 +96,4 @@ Each rule reads from `path` relative to the provider payload and applies `op`.
 - Current Home Assistant file: `logs/websocket-events-home_assistant.log`
 - Provider names are normalized to lowercase and non-alphanumeric characters are converted to `-`.
 - The old shared `logs/websocket-events.log` file is a legacy artifact if it exists; new events are written to provider-specific files.
+- If `runTask` is `false`, matching events are still logged with status `logged` but no agent worker is spawned.

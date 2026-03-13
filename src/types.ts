@@ -161,6 +161,7 @@ export interface WebSocketSubscriptionConfig {
   match?: Record<string, WebSocketMatchValue | WebSocketMatchValue[]>;
   logFilteredEvents?: boolean;
   logCooldownEvents?: boolean;
+  runTask?: boolean;
   targetJid: string;
   promptTemplate: string;
   contextMode?: EventExecutionContextMode;

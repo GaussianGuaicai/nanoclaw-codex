@@ -15,7 +15,12 @@ export interface WebSocketEventLogEntry {
   subscriptionId: string;
   targetJid: string;
   eventType: string;
-  status: 'filtered' | 'cooldown' | 'dispatched' | 'dispatch_error';
+  status:
+    | 'filtered'
+    | 'cooldown'
+    | 'logged'
+    | 'dispatched'
+    | 'dispatch_error';
   error?: string;
   payload: Record<string, unknown>;
 }

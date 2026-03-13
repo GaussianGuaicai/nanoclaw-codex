@@ -339,71 +339,80 @@ function enqueueWebSocketEventTask(params: {
   prompt: string;
   contextMode: 'group' | 'isolated';
   deliverOutput: boolean;
-}): void {
+  logTaskResult: boolean;
+}): Promise<{ status: 'success' | 'error'; result: string | null; error: string | null }> {
   const group = registeredGroups[params.targetJid];
   if (!group) {
     logger.warn(
       { targetJid: params.targetJid, subscriptionId: params.subscriptionId },
       'Skipping WS event task for unknown target group',
     );
-    return;
+    return Promise.resolve({
+      status: 'error',
+      result: null,
+      error: `Unknown target group: ${params.targetJid}`,
+    });
   }
 
   const taskId = `ws-${params.subscriptionId}-${Date.now()}-${Math.random()
     .toString(36)
     .slice(2, 8)}`;
 
-  queue.enqueueTask(params.targetJid, taskId, async () => {
-    const execution = await runSingleTurnAgentTask(
-      group,
-      {
+  return new Promise((resolve) => {
+    queue.enqueueTask(params.targetJid, taskId, async () => {
+      const execution = await runSingleTurnAgentTask(
+        group,
+        {
         chatJid: params.targetJid,
         prompt: params.prompt,
         contextMode: params.contextMode,
         deliverOutput: params.deliverOutput,
+        logWorkerInputOutput: params.logTaskResult,
         assistantName: ASSISTANT_NAME,
       },
-      {
-        getSessions: () => sessions,
-        onProcess: (groupJid, proc, executionName, groupFolder) =>
-          queue.registerProcess(groupJid, proc, executionName, groupFolder),
-        queue,
-        sendMessage: async (jid, rawText) => {
-          const channel = findChannel(channels, jid);
-          if (!channel) {
-            logger.warn(
-              { jid },
-              'No channel owns JID, cannot send WS task output',
-            );
-            return;
-          }
-          const text = formatOutbound(rawText);
-          if (text) await channel.sendMessage(jid, text);
-        },
-      },
-    );
-
-    if (execution.status === 'error') {
-      logger.error(
         {
-          connection: params.connectionName,
-          subscriptionId: params.subscriptionId,
-          targetJid: params.targetJid,
-          error: execution.error,
+          getSessions: () => sessions,
+          onProcess: (groupJid, proc, executionName, groupFolder) =>
+            queue.registerProcess(groupJid, proc, executionName, groupFolder),
+          queue,
+          sendMessage: async (jid, rawText) => {
+            const channel = findChannel(channels, jid);
+            if (!channel) {
+              logger.warn(
+                { jid },
+                'No channel owns JID, cannot send WS task output',
+              );
+              return;
+            }
+            const text = formatOutbound(rawText);
+            if (text) await channel.sendMessage(jid, text);
+          },
         },
-        'WS event task failed',
       );
-      return;
-    }
 
-    logger.info(
-      {
-        connection: params.connectionName,
-        subscriptionId: params.subscriptionId,
-        targetJid: params.targetJid,
-      },
-      'WS event task completed',
-    );
+      if (execution.status === 'error') {
+        logger.error(
+          {
+            connection: params.connectionName,
+            subscriptionId: params.subscriptionId,
+            targetJid: params.targetJid,
+            error: execution.error,
+          },
+          'WS event task failed',
+        );
+      } else {
+        logger.info(
+          {
+            connection: params.connectionName,
+            subscriptionId: params.subscriptionId,
+            targetJid: params.targetJid,
+          },
+          'WS event task completed',
+        );
+      }
+
+      resolve(execution);
+    });
   });
 }
 
@@ -635,13 +644,14 @@ async function main(): Promise<void> {
   webSocketSourceManager = new WebSocketSourceManager({
     getRegisteredGroups: () => registeredGroups,
     runEventTask: async ({ connectionName, subscription, prompt }) => {
-      enqueueWebSocketEventTask({
+      return enqueueWebSocketEventTask({
         connectionName,
         subscriptionId: subscription.id,
         targetJid: subscription.targetJid,
         prompt,
         contextMode: subscription.contextMode || 'isolated',
         deliverOutput: subscription.deliverOutput === true,
+        logTaskResult: subscription.logTaskResult === true,
       });
     },
   });

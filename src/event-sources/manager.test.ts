@@ -98,7 +98,11 @@ describe('WebSocketSourceManager', () => {
       ],
     });
 
-    const runEventTask = vi.fn().mockResolvedValue(undefined);
+    const runEventTask = vi.fn().mockResolvedValue({
+      status: 'success',
+      result: null,
+      error: null,
+    });
     const manager = new WebSocketSourceManager({
       getRegisteredGroups: () => ({
         'slack:C123': {
@@ -152,6 +156,7 @@ describe('WebSocketSourceManager', () => {
       event,
       connectionInstances[0].options.subscriptions[0],
       'dispatched',
+      {},
     );
 
     await vi.advanceTimersByTimeAsync(1001);
@@ -168,6 +173,7 @@ describe('WebSocketSourceManager', () => {
       event,
       connectionInstances[0].options.subscriptions[0],
       'dispatched',
+      {},
     );
 
     await manager.stop();
@@ -211,7 +217,11 @@ describe('WebSocketSourceManager', () => {
           added_at: '2026-03-12T00:00:00.000Z',
         },
       }),
-      runEventTask: vi.fn().mockResolvedValue(undefined),
+      runEventTask: vi.fn().mockResolvedValue({
+        status: 'success',
+        result: null,
+        error: null,
+      }),
     });
 
     await manager.start();
@@ -310,7 +320,11 @@ describe('WebSocketSourceManager', () => {
       ],
     });
 
-    const runEventTask = vi.fn().mockResolvedValue(undefined);
+    const runEventTask = vi.fn().mockResolvedValue({
+      status: 'success',
+      result: null,
+      error: null,
+    });
     const manager = new WebSocketSourceManager({
       getRegisteredGroups: () => ({
         'slack:C123': {
@@ -345,6 +359,73 @@ describe('WebSocketSourceManager', () => {
       event,
       subscription,
       'logged',
+    );
+  });
+
+  it('can include task results in event logs when enabled', async () => {
+    loadConfigMock.mockReturnValue({
+      connections: {
+        ha_main: {
+          name: 'ha_main',
+          provider: 'home_assistant',
+          url: 'http://127.0.0.1:8123',
+          token: 'secret',
+          urlEnvVar: 'TEST_HA_URL',
+          tokenEnvVar: 'TEST_HA_TOKEN',
+        },
+      },
+      subscriptions: [
+        {
+          id: 'task-result',
+          connection: 'ha_main',
+          kind: 'events',
+          eventType: 'state_changed',
+          logTaskResult: true,
+          targetJid: 'slack:C123',
+          promptTemplate: 'Handle {{event_type}}',
+        },
+      ],
+    });
+
+    const runEventTask = vi.fn().mockResolvedValue({
+      status: 'success',
+      result: 'Need to notify user about this change.',
+      error: null,
+    });
+    const manager = new WebSocketSourceManager({
+      getRegisteredGroups: () => ({
+        'slack:C123': {
+          name: 'Ops',
+          folder: 'slack_ops',
+          trigger: '@Andy',
+          added_at: '2026-03-12T00:00:00.000Z',
+        },
+      }),
+      runEventTask,
+    });
+
+    await manager.start();
+
+    const subscription = connectionInstances[0].options.subscriptions[0];
+    const event: NormalizedWebSocketEvent = {
+      connectionName: 'ha_main',
+      subscriptionId: 'task-result',
+      provider: 'home_assistant',
+      eventType: 'state_changed',
+      occurredAt: '2026-03-12T08:00:00.000Z',
+      payload: {
+        event_type: 'state_changed',
+        data: { entity_id: 'switch.gaussian_pc' },
+      },
+    };
+
+    await connectionInstances[0].options.onEvent(event, subscription);
+
+    expect(appendEventLogMock).toHaveBeenCalledWith(
+      event,
+      subscription,
+      'dispatched',
+      {},
     );
   });
 
@@ -383,7 +464,11 @@ describe('WebSocketSourceManager', () => {
           added_at: '2026-03-12T00:00:00.000Z',
         },
       }),
-      runEventTask: vi.fn().mockResolvedValue(undefined),
+      runEventTask: vi.fn().mockResolvedValue({
+        status: 'success',
+        result: null,
+        error: null,
+      }),
     });
 
     await manager.start();

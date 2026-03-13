@@ -15,9 +15,15 @@ interface EventTaskRequest {
   prompt: string;
 }
 
+interface EventTaskResult {
+  status: 'success' | 'error';
+  result: string | null;
+  error: string | null;
+}
+
 export interface WebSocketSourceManagerOptions {
   getRegisteredGroups: () => Record<string, RegisteredGroup>;
-  runEventTask: (request: EventTaskRequest) => Promise<void>;
+  runEventTask: (request: EventTaskRequest) => Promise<EventTaskResult>;
 }
 
 export class WebSocketSourceManager {
@@ -111,20 +117,25 @@ export class WebSocketSourceManager {
             event,
           );
           try {
-            await this.runEventTask({
+            const execution = await this.runEventTask({
               connectionName: connectionConfig.name,
               subscription,
               prompt,
             });
-            appendWebSocketEventLog(event, subscription, 'dispatched');
-          } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
+
             appendWebSocketEventLog(
               event,
               subscription,
-              'dispatch_error',
-              message,
+              execution.status === 'success' ? 'dispatched' : 'dispatch_error',
+              {
+                ...(execution.error ? { error: execution.error } : {}),
+              },
             );
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            appendWebSocketEventLog(event, subscription, 'dispatch_error', {
+              error: message,
+            });
             throw err;
           }
         },

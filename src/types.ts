@@ -162,6 +162,7 @@ export interface WebSocketSubscriptionConfig {
   logFilteredEvents?: boolean;
   logCooldownEvents?: boolean;
   runTask?: boolean;
+  logTaskResult?: boolean;
   targetJid: string;
   promptTemplate: string;
   contextMode?: EventExecutionContextMode;

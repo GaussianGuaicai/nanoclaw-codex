@@ -53,6 +53,7 @@ Use `config-examples/websocket-sources.home-assistant.json` as a Home Assistant-
 - `logFilteredEvents`: optional boolean; defaults to `false`
 - `logCooldownEvents`: optional boolean; defaults to `false`
 - `runTask`: optional boolean; defaults to `true`. Set to `false` for log-only subscriptions.
+- `logTaskResult`: optional boolean; defaults to `false`. When enabled, task result text is written into the corresponding `worker-*.log` file.
 - `targetJid`: registered group/chat JID that owns the task context
 - `promptTemplate`: required task prompt template
 - `contextMode`: `"isolated"` or `"group"`
@@ -97,3 +98,4 @@ Each rule reads from `path` relative to the provider payload and applies `op`.
 - Provider names are normalized to lowercase and non-alphanumeric characters are converted to `-`.
 - The old shared `logs/websocket-events.log` file is a legacy artifact if it exists; new events are written to provider-specific files.
 - If `runTask` is `false`, matching events are still logged with status `logged` but no agent worker is spawned.
+- `logTaskResult` only matters when `runTask` is not `false`; prompt and result are written into the matching `groups/<group>/logs/worker-*.log` file.

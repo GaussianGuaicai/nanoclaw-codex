@@ -254,6 +254,45 @@ describe('container-runner worker execution', () => {
     );
   });
 
+  it('writes prompt and streamed result into worker log when enabled', async () => {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        prompt: 'WebSocket-triggered prompt body',
+        workerLogDetail: {
+          includePrompt: true,
+          includeResult: true,
+        },
+      },
+      () => {},
+      async () => {},
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'No user-facing action needed.',
+      newSessionId: 'session-456',
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    await resultPromise;
+
+    const logWrite = fsMock.writeFileSync.mock.calls.find(
+      ([filePath]) =>
+        typeof filePath === 'string' && filePath.includes('worker-'),
+    );
+
+    expect(logWrite).toBeDefined();
+    expect(logWrite?.[1]).toContain('=== Prompt ===');
+    expect(logWrite?.[1]).toContain('WebSocket-triggered prompt body');
+    expect(logWrite?.[1]).toContain('=== Result ===');
+    expect(logWrite?.[1]).toContain('No user-facing action needed.');
+  });
+
   it('passes sanitized remote MCP servers to the worker input', async () => {
     const onOutput = vi.fn(async () => {});
     const stdinChunks: Buffer[] = [];

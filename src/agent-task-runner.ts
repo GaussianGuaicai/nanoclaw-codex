@@ -31,6 +31,7 @@ export interface AgentTaskRequest {
   prompt: string;
   contextMode: EventExecutionContextMode;
   deliverOutput?: boolean;
+  logWorkerInputOutput?: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
 }
@@ -118,6 +119,13 @@ export async function runSingleTurnAgentTask(
         isMain,
         isScheduledTask: request.isScheduledTask,
         assistantName: request.assistantName || ASSISTANT_NAME,
+        workerLogDetail:
+          request.logWorkerInputOutput === true
+            ? {
+                includePrompt: true,
+                includeResult: true,
+              }
+            : undefined,
       },
       (proc, executionName) =>
         deps.onProcess(request.chatJid, proc, executionName, group.folder),

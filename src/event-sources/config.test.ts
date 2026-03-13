@@ -83,6 +83,7 @@ describe('loadWebSocketSourcesConfig', () => {
               },
             ],
             runTask: false,
+            logTaskResult: true,
             targetJid: 'slack:C123',
             promptTemplate: 'Handle {{event_type}}',
           },
@@ -111,6 +112,7 @@ describe('loadWebSocketSourcesConfig', () => {
       },
     ]);
     expect(loaded.subscriptions[0].runTask).toBe(false);
+    expect(loaded.subscriptions[0].logTaskResult).toBe(true);
   });
 
   it('skips connections whose env values are missing', () => {

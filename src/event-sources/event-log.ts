@@ -25,6 +25,10 @@ export interface WebSocketEventLogEntry {
   payload: Record<string, unknown>;
 }
 
+export interface WebSocketEventLogMetadata {
+  error?: string;
+}
+
 export function getWebSocketEventLogPath(provider: string): string {
   const safeProvider = provider
     .toLowerCase()
@@ -38,7 +42,7 @@ export function appendWebSocketEventLog(
   event: NormalizedWebSocketEvent,
   subscription: WebSocketSubscriptionConfig,
   status: WebSocketEventLogEntry['status'],
-  error?: string,
+  metadata: WebSocketEventLogMetadata = {},
 ): void {
   const logPath = getWebSocketEventLogPath(event.provider);
   const entry: WebSocketEventLogEntry = {
@@ -49,7 +53,7 @@ export function appendWebSocketEventLog(
     targetJid: subscription.targetJid,
     eventType: event.eventType,
     status,
-    ...(error ? { error } : {}),
+    ...(metadata.error ? { error: metadata.error } : {}),
     payload: event.payload,
   };
 

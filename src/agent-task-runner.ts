@@ -85,7 +85,7 @@ export async function runSingleTurnAgentTask(
   };
 
   const handleOutput = async (output: ContainerOutput) => {
-    if (output.newSessionId) {
+    if (request.contextMode === 'group' && output.newSessionId) {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
     }
@@ -126,7 +126,7 @@ export async function runSingleTurnAgentTask(
 
     if (closeTimer) clearTimeout(closeTimer);
 
-    if (output.newSessionId) {
+    if (request.contextMode === 'group' && output.newSessionId) {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
     }

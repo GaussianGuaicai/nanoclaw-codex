@@ -163,6 +163,8 @@ export interface WebSocketSubscriptionConfig {
   logCooldownEvents?: boolean;
   runTask?: boolean;
   logTaskResult?: boolean;
+  taskInstructions?: string;
+  taskInstructionsPath?: string;
   targetJid: string;
   promptTemplate: string;
   contextMode?: EventExecutionContextMode;

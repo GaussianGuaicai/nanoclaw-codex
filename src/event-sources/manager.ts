@@ -7,7 +7,7 @@ import {
   createWebSocketSourceConnection,
   WebSocketSourceConnection,
 } from './registry.js';
-import { matchesSubscription, renderPromptTemplate } from './template.js';
+import { buildWebSocketTaskPrompt, matchesSubscription } from './template.js';
 
 interface EventTaskRequest {
   connectionName: string;
@@ -112,10 +112,7 @@ export class WebSocketSourceManager {
             return;
           }
 
-          const prompt = renderPromptTemplate(
-            subscription.promptTemplate,
-            event,
-          );
+          const prompt = buildWebSocketTaskPrompt(subscription, event);
           try {
             const execution = await this.runEventTask({
               connectionName: connectionConfig.name,

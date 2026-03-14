@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { matchesSubscription, renderPromptTemplate } from './template.js';
+import {
+  buildWebSocketTaskPrompt,
+  matchesSubscription,
+  renderPromptTemplate,
+} from './template.js';
 import {
   NormalizedWebSocketEvent,
   WebSocketSubscriptionConfig,
@@ -125,5 +129,26 @@ describe('event source template helpers', () => {
     expect(prompt).toContain('2026-03-12T10:00:00.000Z');
     expect(prompt).toContain('"entity_id": "binary_sensor.front_door"');
     expect(prompt).toContain('{{unknown_key}}');
+  });
+
+  it('builds a task prompt with optional instructions and channel reply contract', () => {
+    const prompt = buildWebSocketTaskPrompt(
+      {
+        ...subscription,
+        taskInstructions:
+          'Handle this according to my home preferences for {{event_type}}.',
+        deliverOutput: true,
+      },
+      event,
+    );
+
+    expect(prompt).toContain(
+      'Handle this according to my home preferences for state_changed.',
+    );
+    expect(prompt).toContain('Channel reply requirements:');
+    expect(prompt).toContain(
+      'Send a concise user-facing reply suitable for the target channel.',
+    );
+    expect(prompt).toContain('source=ha_main');
   });
 });

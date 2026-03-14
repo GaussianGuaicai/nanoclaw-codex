@@ -7,6 +7,8 @@ const { readEnvFileMock, testConfigPath } = vi.hoisted(() => ({
   testConfigPath: '/tmp/nanoclaw-websocket-sources.test.json',
 }));
 
+const testInstructionsPath = '/tmp/nanoclaw-websocket-task-instructions.test.md';
+
 vi.mock('../config.js', () => ({
   WEBSOCKET_SOURCES_PATH: testConfigPath,
 }));
@@ -36,11 +38,21 @@ describe('loadWebSocketSourcesConfig', () => {
     } catch {
       // ignore missing file
     }
+    try {
+      fs.unlinkSync(testInstructionsPath);
+    } catch {
+      // ignore missing file
+    }
   });
 
   afterEach(() => {
     try {
       fs.unlinkSync(testConfigPath);
+    } catch {
+      // ignore missing file
+    }
+    try {
+      fs.unlinkSync(testInstructionsPath);
     } catch {
       // ignore missing file
     }
@@ -165,5 +177,42 @@ describe('loadWebSocketSourcesConfig', () => {
       name: 'vendor_main',
       provider: 'custom_vendor',
     });
+  });
+
+  it('loads task instructions from a separate host file', () => {
+    fs.writeFileSync(testInstructionsPath, 'Use my quiet-hours preference.');
+    fs.writeFileSync(
+      testConfigPath,
+      JSON.stringify({
+        connections: {
+          ha_main: {
+            provider: 'home_assistant',
+            urlEnvVar: 'TEST_HA_URL',
+            tokenEnvVar: 'TEST_HA_TOKEN',
+          },
+        },
+        subscriptions: [
+          {
+            id: 'front-door',
+            connection: 'ha_main',
+            kind: 'events',
+            eventType: 'state_changed',
+            taskInstructionsPath: testInstructionsPath,
+            targetJid: 'slack:C123',
+            promptTemplate: 'Handle {{event_type}}',
+          },
+        ],
+      }),
+    );
+
+    readEnvFileMock.mockReturnValue({
+      TEST_HA_URL: 'http://127.0.0.1:8123',
+      TEST_HA_TOKEN: 'secret-token',
+    });
+
+    const loaded = loadWebSocketSourcesConfig();
+    expect(loaded.subscriptions[0].taskInstructions).toBe(
+      'Use my quiet-hours preference.',
+    );
   });
 });

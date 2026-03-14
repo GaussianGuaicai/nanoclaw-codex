@@ -54,10 +54,12 @@ Use `config-examples/websocket-sources.home-assistant.json` as a Home Assistant-
 - `logCooldownEvents`: optional boolean; defaults to `false`
 - `runTask`: optional boolean; defaults to `true`. Set to `false` for log-only subscriptions.
 - `logTaskResult`: optional boolean; defaults to `false`. When enabled, task result text is written into the corresponding `worker-*.log` file.
+- `taskInstructions`: optional inline execution instructions prepended to the generated task prompt
+- `taskInstructionsPath`: optional host file path whose contents are appended to `taskInstructions`; useful for longer user preference notes
 - `targetJid`: registered group/chat JID that owns the task context
 - `promptTemplate`: required task prompt template
 - `contextMode`: `"isolated"` or `"group"`
-- `deliverOutput`: whether the task result should be sent back to the target chat
+- `deliverOutput`: whether the task result should be sent back to the target chat; when enabled NanoClaw also adds a generic user-visible reply contract to the task prompt
 - `cooldownMs`: optional per-subscription suppression window
 
 ## Prompt template variables
@@ -67,6 +69,8 @@ Use `config-examples/websocket-sources.home-assistant.json` as a Home Assistant-
 - `{{event_type}}`
 - `{{time_fired}}`
 - `{{event_json}}`
+
+If `taskInstructions` is present, it is rendered with the same placeholders before being prepended to the final task prompt.
 
 ## Generic filter rules
 
@@ -99,3 +103,4 @@ Each rule reads from `path` relative to the provider payload and applies `op`.
 - The old shared `logs/websocket-events.log` file is a legacy artifact if it exists; new events are written to provider-specific files.
 - If `runTask` is `false`, matching events are still logged with status `logged` but no agent worker is spawned.
 - `logTaskResult` only matters when `runTask` is not `false`; prompt and result are written into the matching `groups/<group>/logs/worker-*.log` file.
+- `deliverOutput: true` is the main switch for sending the worker's user-visible reply back through the target channel after the task runs.

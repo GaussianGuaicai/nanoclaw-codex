@@ -39,11 +39,12 @@
         "data.entity_id": "binary_sensor.front_door",
         "data.new_state.state": "on"
       },
-      "runTask": false,
+      "runTask": true,
+      "taskInstructions": "Apply my home-automation preferences before deciding what to do. Keep notifications concise, mention any action you took, and explicitly say when no further action is needed.",
       "targetJid": "slack:C0123456789",
       "promptTemplate": "Home Assistant event {{event_type}} fired at {{time_fired}}.\nEvaluate the event payload and decide whether to notify or trigger follow-up automation.\n\n{{event_json}}",
       "contextMode": "isolated",
-      "deliverOutput": false,
+      "deliverOutput": true,
       "cooldownMs": 10000
     }
   ]

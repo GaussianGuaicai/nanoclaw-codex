@@ -429,6 +429,86 @@ describe('WebSocketSourceManager', () => {
     );
   });
 
+  it('adds task instructions and channel reply contract to prompts when configured', async () => {
+    loadConfigMock.mockReturnValue({
+      connections: {
+        ha_main: {
+          name: 'ha_main',
+          provider: 'home_assistant',
+          url: 'http://127.0.0.1:8123',
+          token: 'secret',
+          urlEnvVar: 'TEST_HA_URL',
+          tokenEnvVar: 'TEST_HA_TOKEN',
+        },
+      },
+      subscriptions: [
+        {
+          id: 'guided-task',
+          connection: 'ha_main',
+          kind: 'events',
+          eventType: 'state_changed',
+          taskInstructions:
+            'Apply my preferences before deciding what to do with {{event_type}}.',
+          targetJid: 'slack:C123',
+          promptTemplate: 'Handle {{event_type}} for {{connection_name}}',
+          deliverOutput: true,
+        },
+      ],
+    });
+
+    const runEventTask = vi.fn().mockResolvedValue({
+      status: 'success',
+      result: 'Door opened.',
+      error: null,
+    });
+    const manager = new WebSocketSourceManager({
+      getRegisteredGroups: () => ({
+        'slack:C123': {
+          name: 'Ops',
+          folder: 'slack_ops',
+          trigger: '@Andy',
+          added_at: '2026-03-12T00:00:00.000Z',
+        },
+      }),
+      runEventTask,
+    });
+
+    await manager.start();
+
+    const subscription = connectionInstances[0].options.subscriptions[0];
+    const event: NormalizedWebSocketEvent = {
+      connectionName: 'ha_main',
+      subscriptionId: 'guided-task',
+      provider: 'home_assistant',
+      eventType: 'state_changed',
+      occurredAt: '2026-03-12T08:00:00.000Z',
+      payload: {
+        event_type: 'state_changed',
+        data: { entity_id: 'binary_sensor.front_door' },
+      },
+    };
+
+    await connectionInstances[0].options.onEvent(event, subscription);
+
+    expect(runEventTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining(
+          'Apply my preferences before deciding what to do with state_changed.',
+        ),
+      }),
+    );
+    expect(runEventTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining('Channel reply requirements:'),
+      }),
+    );
+    expect(runEventTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining('Handle state_changed for ha_main'),
+      }),
+    );
+  });
+
   it('skips unsupported providers without constructing a connection', async () => {
     loadConfigMock.mockReturnValue({
       connections: {

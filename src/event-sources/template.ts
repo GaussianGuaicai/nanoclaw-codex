@@ -5,6 +5,13 @@ import {
   WebSocketSubscriptionConfig,
 } from '../types.js';
 
+const CHANNEL_REPLY_CONTRACT = [
+  'Channel reply requirements:',
+  '- Send a concise user-facing reply suitable for the target channel.',
+  '- If no action is needed, still explain briefly what changed and why no action was taken.',
+  '- Do not return only <internal>...</internal> content.',
+].join('\n');
+
 function getValueAtPath(
   payload: Record<string, unknown>,
   path: string,
@@ -132,4 +139,23 @@ export function renderPromptTemplate(
   return template.replace(/\{\{\s*([a-z_]+)\s*\}\}/g, (match, key) => {
     return Object.hasOwn(replacements, key) ? replacements[key] : match;
   });
+}
+
+export function buildWebSocketTaskPrompt(
+  subscription: WebSocketSubscriptionConfig,
+  event: NormalizedWebSocketEvent,
+): string {
+  const sections: string[] = [];
+
+  if (subscription.taskInstructions?.trim()) {
+    sections.push(renderPromptTemplate(subscription.taskInstructions.trim(), event));
+  }
+
+  if (subscription.deliverOutput === true) {
+    sections.push(CHANNEL_REPLY_CONTRACT);
+  }
+
+  sections.push(renderPromptTemplate(subscription.promptTemplate, event));
+
+  return sections.join('\n\n');
 }

@@ -1,4 +1,6 @@
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 import { z } from 'zod';
 
@@ -101,6 +103,8 @@ const subscriptionSchema = z.object({
   logCooldownEvents: z.boolean().optional(),
   runTask: z.boolean().optional(),
   logTaskResult: z.boolean().optional(),
+  taskInstructions: z.string().min(1).optional(),
+  taskInstructionsPath: z.string().min(1).optional(),
   targetJid: z.string().min(1),
   promptTemplate: z.string().min(1),
   contextMode: z.enum(['group', 'isolated']).optional(),
@@ -122,6 +126,14 @@ export interface ResolvedWebSocketConnectionConfig extends WebSocketConnectionCo
 export interface LoadedWebSocketSourcesConfig {
   connections: Record<string, ResolvedWebSocketConnectionConfig>;
   subscriptions: WebSocketSubscriptionConfig[];
+}
+
+function resolveUserPath(inputPath: string): string {
+  if (inputPath.startsWith('~/')) {
+    return path.join(process.env.HOME || os.homedir(), inputPath.slice(2));
+  }
+
+  return path.resolve(inputPath);
 }
 
 export function loadWebSocketSourcesConfig(): LoadedWebSocketSourcesConfig {
@@ -157,6 +169,44 @@ export function loadWebSocketSourcesConfig(): LoadedWebSocketSourcesConfig {
 
   const envFromFile = readEnvFile(envKeys);
   const connections: Record<string, ResolvedWebSocketConnectionConfig> = {};
+  const subscriptions = parsed.subscriptions.map((subscription) => {
+    if (!subscription.taskInstructionsPath) {
+      return subscription;
+    }
+
+    const instructionsPath = resolveUserPath(subscription.taskInstructionsPath);
+
+    try {
+      const taskInstructions = fs.readFileSync(instructionsPath, 'utf-8').trim();
+      if (!taskInstructions) {
+        logger.warn(
+          {
+            subscriptionId: subscription.id,
+            path: instructionsPath,
+          },
+          'Ignoring empty WS task instructions file',
+        );
+        return subscription;
+      }
+
+      return {
+        ...subscription,
+        taskInstructions: subscription.taskInstructions
+          ? `${subscription.taskInstructions.trim()}\n\n${taskInstructions}`
+          : taskInstructions,
+      };
+    } catch (err) {
+      logger.error(
+        {
+          err,
+          subscriptionId: subscription.id,
+          path: instructionsPath,
+        },
+        'Failed to load WS task instructions file',
+      );
+      return subscription;
+    }
+  });
 
   for (const [name, connection] of Object.entries(parsed.connections)) {
     const url =
@@ -187,6 +237,6 @@ export function loadWebSocketSourcesConfig(): LoadedWebSocketSourcesConfig {
 
   return {
     connections,
-    subscriptions: parsed.subscriptions,
+    subscriptions,
   };
 }

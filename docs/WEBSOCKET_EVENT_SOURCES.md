@@ -101,6 +101,7 @@ Each rule reads from `path` relative to the provider payload and applies `op`.
 - Current Home Assistant file: `logs/websocket-events-home_assistant.log`
 - Provider names are normalized to lowercase and non-alphanumeric characters are converted to `-`.
 - The old shared `logs/websocket-events.log` file is a legacy artifact if it exists; new events are written to provider-specific files.
+- Event-log top-level timestamps such as `receivedAt` and `occurredAt` are written in the host's local timezone with an explicit UTC offset.
 - If `runTask` is `false`, matching events are still logged with status `logged` but no agent worker is spawned.
 - `logTaskResult` only matters when `runTask` is not `false`; prompt and result are written into the matching `groups/<group>/logs/worker-*.log` file.
 - `deliverOutput: true` is the main switch for sending the worker's user-visible reply back through the target channel after the task runs.

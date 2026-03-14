@@ -1,4 +1,5 @@
 import { logger } from '../logger.js';
+import { formatLocalIsoTimestamp } from '../time.js';
 import {
   NormalizedWebSocketEvent,
   WebSocketSubscriptionConfig,
@@ -157,8 +158,8 @@ export class HomeAssistantConnection extends ManagedWebSocketConnection {
           : subscription.eventType,
       occurredAt:
         typeof event.time_fired === 'string'
-          ? event.time_fired
-          : new Date().toISOString(),
+          ? formatLocalIsoTimestamp(event.time_fired)
+          : formatLocalIsoTimestamp(),
       payload: event,
     };
   }

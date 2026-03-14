@@ -148,7 +148,9 @@ export function buildWebSocketTaskPrompt(
   const sections: string[] = [];
 
   if (subscription.taskInstructions?.trim()) {
-    sections.push(renderPromptTemplate(subscription.taskInstructions.trim(), event));
+    sections.push(
+      renderPromptTemplate(subscription.taskInstructions.trim(), event),
+    );
   }
 
   if (subscription.deliverOutput === true) {

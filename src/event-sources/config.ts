@@ -177,7 +177,9 @@ export function loadWebSocketSourcesConfig(): LoadedWebSocketSourcesConfig {
     const instructionsPath = resolveUserPath(subscription.taskInstructionsPath);
 
     try {
-      const taskInstructions = fs.readFileSync(instructionsPath, 'utf-8').trim();
+      const taskInstructions = fs
+        .readFileSync(instructionsPath, 'utf-8')
+        .trim();
       if (!taskInstructions) {
         logger.warn(
           {

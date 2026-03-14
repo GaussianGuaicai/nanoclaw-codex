@@ -17,6 +17,10 @@ import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
+import {
+  formatLocalIsoTimestamp,
+  formatLocalTimestampForFilename,
+} from './time.js';
 import { RegisteredGroup, RemoteMcpServerConfig } from './types.js';
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -659,13 +663,14 @@ export async function runContainerAgent(
       const duration = Date.now() - startTime;
 
       if (timedOut) {
-        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        const now = new Date();
+        const ts = formatLocalTimestampForFilename(now);
         const timeoutLog = path.join(logsDir, `worker-${ts}.log`);
         fs.writeFileSync(
           timeoutLog,
           [
             '=== Agent Run Log (TIMEOUT) ===',
-            `Timestamp: ${new Date().toISOString()}`,
+            `Timestamp: ${formatLocalIsoTimestamp(now)}`,
             `Group: ${group.name}`,
             `Execution: ${executionName}`,
             `Duration: ${duration}ms`,
@@ -697,7 +702,8 @@ export async function runContainerAgent(
         return;
       }
 
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const now = new Date();
+      const timestamp = formatLocalTimestampForFilename(now);
       const logFile = path.join(logsDir, `worker-${timestamp}.log`);
       const isVerbose =
         process.env.LOG_LEVEL === 'debug' || process.env.LOG_LEVEL === 'trace';
@@ -713,7 +719,7 @@ export async function runContainerAgent(
           : resultPreviewRaw;
       const logLines = [
         '=== Agent Run Log ===',
-        `Timestamp: ${new Date().toISOString()}`,
+        `Timestamp: ${formatLocalIsoTimestamp(now)}`,
         `Group: ${group.name}`,
         `IsMain: ${input.isMain}`,
         `Duration: ${duration}ms`,
@@ -755,19 +761,11 @@ export async function runContainerAgent(
         );
 
         if (input.workerLogDetail?.includePrompt === true) {
-          logLines.push(
-            '=== Prompt ===',
-            promptPreview || '(empty)',
-            '',
-          );
+          logLines.push('=== Prompt ===', promptPreview || '(empty)', '');
         }
 
         if (input.workerLogDetail?.includeResult === true) {
-          logLines.push(
-            '=== Result ===',
-            resultPreview || '(no result)',
-            '',
-          );
+          logLines.push('=== Result ===', resultPreview || '(no result)', '');
         }
       }
 

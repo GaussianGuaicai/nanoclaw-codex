@@ -12,6 +12,7 @@ vi.mock('../logger.js', () => ({
 }));
 
 import { HomeAssistantConnection } from './home-assistant.js';
+import { formatLocalIsoTimestamp } from '../time.js';
 
 class FakeWebSocket extends EventEmitter {
   static readonly CONNECTING = 0;
@@ -127,7 +128,7 @@ describe('HomeAssistantConnection', () => {
       expect.objectContaining({
         connectionName: 'ha_main',
         eventType: 'state_changed',
-        occurredAt: '2026-03-12T08:00:00.000Z',
+        occurredAt: formatLocalIsoTimestamp('2026-03-12T08:00:00.000Z'),
       }),
       expect.objectContaining({ id: 'kitchen-light' }),
     );

@@ -75,6 +75,10 @@ describe('appendWebSocketEventLog', () => {
     expect(entry.connectionName).toBe('ha_main');
     expect(entry.subscriptionId).toBe('front-door');
     expect(entry.targetJid).toBe('slack:C123');
+    expect(entry.occurredAt).toBe('2026-03-12T08:00:00.000Z');
+    expect(String(entry.receivedAt)).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}$/,
+    );
     expect(entry.eventType).toBe('state_changed');
     expect(entry.status).toBe('dispatched');
   });

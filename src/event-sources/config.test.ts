@@ -7,7 +7,8 @@ const { readEnvFileMock, testConfigPath } = vi.hoisted(() => ({
   testConfigPath: '/tmp/nanoclaw-websocket-sources.test.json',
 }));
 
-const testInstructionsPath = '/tmp/nanoclaw-websocket-task-instructions.test.md';
+const testInstructionsPath =
+  '/tmp/nanoclaw-websocket-task-instructions.test.md';
 
 vi.mock('../config.js', () => ({
   WEBSOCKET_SOURCES_PATH: testConfigPath,

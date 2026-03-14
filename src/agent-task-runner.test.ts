@@ -98,7 +98,11 @@ describe('runSingleTurnAgentTask', () => {
 
     expect(sessions.team).toBe('final-session');
     expect(setSessionMock).toHaveBeenCalledTimes(2);
-    expect(setSessionMock).toHaveBeenNthCalledWith(1, 'team', 'streamed-session');
+    expect(setSessionMock).toHaveBeenNthCalledWith(
+      1,
+      'team',
+      'streamed-session',
+    );
     expect(setSessionMock).toHaveBeenNthCalledWith(2, 'team', 'final-session');
   });
 });

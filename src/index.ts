@@ -340,7 +340,11 @@ function enqueueWebSocketEventTask(params: {
   contextMode: 'group' | 'isolated';
   deliverOutput: boolean;
   logTaskResult: boolean;
-}): Promise<{ status: 'success' | 'error'; result: string | null; error: string | null }> {
+}): Promise<{
+  status: 'success' | 'error';
+  result: string | null;
+  error: string | null;
+}> {
   const group = registeredGroups[params.targetJid];
   if (!group) {
     logger.warn(
@@ -363,13 +367,13 @@ function enqueueWebSocketEventTask(params: {
       const execution = await runSingleTurnAgentTask(
         group,
         {
-        chatJid: params.targetJid,
-        prompt: params.prompt,
-        contextMode: params.contextMode,
-        deliverOutput: params.deliverOutput,
-        logWorkerInputOutput: params.logTaskResult,
-        assistantName: ASSISTANT_NAME,
-      },
+          chatJid: params.targetJid,
+          prompt: params.prompt,
+          contextMode: params.contextMode,
+          deliverOutput: params.deliverOutput,
+          logWorkerInputOutput: params.logTaskResult,
+          assistantName: ASSISTANT_NAME,
+        },
         {
           getSessions: () => sessions,
           onProcess: (groupJid, proc, executionName, groupFolder) =>

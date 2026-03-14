@@ -3,6 +3,7 @@ import path from 'path';
 
 import { LOGS_DIR } from '../config.js';
 import { logger } from '../logger.js';
+import { formatLocalIsoTimestamp } from '../time.js';
 import {
   NormalizedWebSocketEvent,
   WebSocketSubscriptionConfig,
@@ -10,17 +11,13 @@ import {
 
 export interface WebSocketEventLogEntry {
   receivedAt: string;
+  occurredAt: string;
   provider: string;
   connectionName: string;
   subscriptionId: string;
   targetJid: string;
   eventType: string;
-  status:
-    | 'filtered'
-    | 'cooldown'
-    | 'logged'
-    | 'dispatched'
-    | 'dispatch_error';
+  status: 'filtered' | 'cooldown' | 'logged' | 'dispatched' | 'dispatch_error';
   error?: string;
   payload: Record<string, unknown>;
 }
@@ -46,7 +43,8 @@ export function appendWebSocketEventLog(
 ): void {
   const logPath = getWebSocketEventLogPath(event.provider);
   const entry: WebSocketEventLogEntry = {
-    receivedAt: new Date().toISOString(),
+    receivedAt: formatLocalIsoTimestamp(),
+    occurredAt: event.occurredAt,
     provider: event.provider,
     connectionName: event.connectionName,
     subscriptionId: subscription.id,

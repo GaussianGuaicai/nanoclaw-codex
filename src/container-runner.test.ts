@@ -287,7 +287,13 @@ describe('container-runner worker execution', () => {
     );
 
     expect(logWrite).toBeDefined();
+    expect(String(logWrite?.[0])).toMatch(
+      /worker-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}[+-]\d{2}-\d{2}\.log$/,
+    );
     expect(logWrite?.[1]).toContain('=== Prompt ===');
+    expect(logWrite?.[1]).toMatch(
+      /Timestamp: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}/,
+    );
     expect(logWrite?.[1]).toContain('WebSocket-triggered prompt body');
     expect(logWrite?.[1]).toContain('=== Result ===');
     expect(logWrite?.[1]).toContain('No user-facing action needed.');

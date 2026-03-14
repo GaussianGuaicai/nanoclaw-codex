@@ -14,7 +14,7 @@
   <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="34.9k tokens, 17% of context window" valign="middle"></a>
 </p>
 
-This fork keeps NanoClaw's small-core, skill-first host architecture, but replaces the old container runtime with a local Codex sandbox worker. The host process still handles channels, routing, scheduling, group state, and IPC. Codex now runs directly on the host with per-group `CODEX_HOME`, group-scoped workspaces, and host-prepared writable roots or snapshots.
+This fork keeps NanoClaw's small-core, skill-first host architecture, but replaces the old container runtime with a local Codex sandbox worker. The host process still handles channels, routing, scheduling, group state, IPC, remote MCP wiring, and host-side WebSocket event sources. Codex now runs directly on the host with per-group `CODEX_HOME`, group-scoped workspaces, and host-prepared writable roots or snapshots.
 
 ## What This Fork Changes
 
@@ -23,6 +23,8 @@ This fork keeps NanoClaw's small-core, skill-first host architecture, but replac
 - Keeps per-group session state in `data/sessions/{group}/.codex`
 - Preserves task scheduling, IPC tools, and skill-based channel installation
 - Keeps `containerConfig` as a compatibility input, but maps it to sandbox writable roots or read-only snapshots
+- Adds per-group remote MCP server support over HTTP or SSE, with optional proxy bypass and HTTP-to-stdio bridging
+- Adds host-side WebSocket event sources that can trigger immediate tasks, with Home Assistant as the first built-in provider
 
 ## Why NanoClaw
 
@@ -50,7 +52,7 @@ The setup flow is still skill-driven. It installs dependencies, configures chann
 
 NanoClaw is now Codex-only.
 
-Required `.env` keys:
+Core `.env` keys:
 
 ```bash
 OPENAI_API_KEY=sk-...
@@ -63,9 +65,32 @@ NANOCLAW_CODEX_NETWORK_ACCESS=true
 NANOCLAW_CODEX_WEB_SEARCH_ENABLED=false
 NANOCLAW_CODEX_WEB_SEARCH_MODE=disabled
 NANOCLAW_CODEX_REASONING_EFFORT=medium
+
+# Optional integrations used by recent host-side automations
+HOME_ASSISTANT_URL=https://your-home-assistant.example
+HASS_ACCESS_TOKEN=your-home-assistant-token
 ```
 
 Per-group Codex state lives under `data/sessions/{group}/.codex`. That directory is used as `CODEX_HOME`, so each group gets isolated session history, auth state, logs, and local Codex metadata.
+
+## Remote MCP and Event Sources
+
+Remote MCP servers can now be attached per group through `containerConfig.mcpServers`.
+
+- Supports `http` and `sse` transports
+- `bearerTokenEnvVar` loads an Authorization bearer token from `.env` without hardcoding it in group config
+- `bypassProxy` adds the remote host to `NO_PROXY` for the worker process
+- `bridgeToStdio` wraps HTTP MCP servers with a local stdio bridge before exposing them to Codex
+
+NanoClaw can also consume host-side WebSocket event sources from `~/.config/nanoclaw/websocket-sources.json` and turn matching events into immediate tasks.
+
+- Current built-in provider: Home Assistant
+- Example config: [config-examples/websocket-sources.home-assistant.json](config-examples/websocket-sources.home-assistant.json)
+- Full docs: [docs/WEBSOCKET_EVENT_SOURCES.md](docs/WEBSOCKET_EVENT_SOURCES.md)
+- Matching events can be log-only or run an agent task immediately
+- `deliverOutput: true` sends the task result back through the owning channel
+- `logTaskResult: true` writes prompt and result details into the group's `worker-*.log`
+- Provider-specific JSONL event logs are written to `logs/websocket-events-<provider>.log`
 
 ## Sandbox Model
 
@@ -87,6 +112,8 @@ The runtime defaults to `workspace-write` sandbox mode with `approval_policy=nev
 - Per-group Codex session state via `data/sessions/*/.codex`
 - Scheduled tasks that run through the same local worker
 - File-based IPC between the host orchestrator and the worker MCP server
+- Per-group remote MCP server attachments
+- Host-side WebSocket event subscriptions with immediate task execution
 - Skill-based channel installation (`$add-whatsapp`, `$add-telegram`, `$add-slack`, `$add-discord`, `$add-gmail`)
 
 The core intentionally does not bundle channel implementations. Channels are added by skills that patch `src/channels/` and self-register at startup.
@@ -117,33 +144,41 @@ npm run setup:environment  # inspect env, auth, registered groups
 npm run setup:worker       # rebuild and verify the local Codex worker
 npm run setup:service      # generate and load the launchd/systemd service
 npm run setup:verify       # end-to-end install health check
+npm run service:start      # repo-local service start helper
 npm run service:status     # repo-local service status helper
 npm run service:stop       # repo-local service stop helper
 npm run service:restart    # repo-local service restart helper
 tail -f logs/nanoclaw.log  # live service log
+tail -f logs/websocket-events-home_assistant.log  # inspect HA event activity
 ```
 
 ## Architecture
 
 ```text
-Channels --> SQLite --> Polling loop --> Local worker runner --> Codex SDK --> Response
+Channels --> SQLite --> Polling loop -----------\
+                                                  --> Local worker runner --> Codex SDK --> Channel reply / logs
+WebSocket event sources --> Event manager --> Immediate task runner --/
 ```
 
-Single Node.js process. Installed channels self-register at startup. The orchestrator connects whichever channels have credentials present, queues work per group, prepares group-specific sandbox inputs, and spawns a local Codex worker process. The worker starts Codex with:
+Single Node.js process. Installed channels self-register at startup. The orchestrator connects whichever channels have credentials present, queues work per group, watches host-side WebSocket subscriptions, prepares group-specific sandbox inputs, and spawns a local Codex worker process. The worker starts Codex with:
 
 - a per-group `CODEX_HOME`
 - a group working directory
 - host-selected additional writable roots
 - a local MCP server for messaging and scheduling tools
+- optional remote MCP servers, attached directly or through the local HTTP MCP bridge
 
 Key files:
 
 - `src/index.ts` - Orchestrator: state, message loop, agent invocation
+- `src/agent-task-runner.ts` - Immediate task execution path used by event sources
 - `src/container-runner.ts` - Host-side worker launch, sandbox layout prep, stdout parsing
+- `src/event-sources/manager.ts` - Loads WebSocket config, owns provider lifecycles, dispatches matching events
 - `src/ipc.ts` - IPC watcher and task processing
 - `src/task-scheduler.ts` - Scheduled task execution
 - `src/db.ts` - SQLite operations
 - `container/agent-runner/src/index.ts` - Local worker entrypoint
+- `container/agent-runner/src/http-mcp-bridge.ts` - HTTP MCP to stdio bridge used for remote MCP compatibility
 - `container/agent-runner/src/runtime/codex-runtime.ts` - Codex runtime implementation
 - `container/agent-runner/src/ipc-mcp-stdio.ts` - MCP tools exposed to Codex
 - `groups/*/AGENTS.md` - Per-group memory
@@ -155,6 +190,7 @@ The main security boundary is now Codex sandbox policy plus host-side directory 
 - Main group can edit the repo root.
 - Non-main groups are limited to their own group directory plus any host-approved extra roots or snapshots.
 - Extra writable roots are validated against an external allowlist at `~/.config/nanoclaw/mount-allowlist.json`.
+- WebSocket event-source config stays host-side in `~/.config/nanoclaw/websocket-sources.json`.
 - The host still owns channel auth, sender allowlists, scheduling state, and IPC authorization.
 
 See [docs/SECURITY.md](docs/SECURITY.md) for the current model.
@@ -173,6 +209,10 @@ Yes:
 OPENAI_BASE_URL=https://your-openai-compatible-endpoint.com
 OPENAI_API_KEY=your-token-here
 ```
+
+**Can I connect remote MCP servers or Home Assistant events?**
+
+Yes. Use `containerConfig.mcpServers` for per-group MCP attachments, and add host-side WebSocket subscriptions in `~/.config/nanoclaw/websocket-sources.json`. For Home Assistant, start from `config-examples/websocket-sources.home-assistant.json` and set `HOME_ASSISTANT_URL` plus `HASS_ACCESS_TOKEN` in `.env`.
 
 **Is this as isolated as the old container version?**
 

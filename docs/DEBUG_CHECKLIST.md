@@ -91,6 +91,19 @@ cat data/ipc/<group-folder>/current_tasks.json
 cat data/ipc/<group-folder>/available_groups.json
 ```
 
+## WebSocket Event Sources
+
+```bash
+# Confirm provider-specific event log files are being written
+ls -1 logs | grep 'websocket-events'
+
+# Tail the Home Assistant event stream
+tail -f logs/websocket-events-home_assistant.log
+
+# Check WebSocket source startup and subscription logs
+grep -E 'WS socket opened|subscriptions active|unsupported WS provider' logs/nanoclaw.log | tail -20
+```
+
 ## WhatsApp Auth Issues
 
 ```bash
@@ -107,6 +120,11 @@ npm run auth
 ## Service Management
 
 ```bash
+# Repo-local helpers
+npm run service:status
+npm run service:stop
+npm run service:restart
+
 # Restart the service
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 

@@ -117,6 +117,9 @@ npm run setup:environment  # inspect env, auth, registered groups
 npm run setup:worker       # rebuild and verify the local Codex worker
 npm run setup:service      # generate and load the launchd/systemd service
 npm run setup:verify       # end-to-end install health check
+npm run service:status     # repo-local service status helper
+npm run service:stop       # repo-local service stop helper
+npm run service:restart    # repo-local service restart helper
 tail -f logs/nanoclaw.log  # live service log
 ```
 

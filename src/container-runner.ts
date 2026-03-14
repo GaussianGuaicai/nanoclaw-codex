@@ -17,6 +17,10 @@ import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
+import {
+  formatLocalIsoTimestamp,
+  formatLocalTimestampForFilename,
+} from './time.js';
 import { RegisteredGroup, RemoteMcpServerConfig } from './types.js';
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -44,6 +48,10 @@ export interface ContainerInput {
   remoteMcpServers?: Record<string, RemoteMcpServerConfig>;
   remoteMcpNoProxyHosts?: string[];
   remoteMcpBridgeNames?: string[];
+  workerLogDetail?: {
+    includePrompt?: boolean;
+    includeResult?: boolean;
+  };
   secrets?: Record<string, string>;
 }
 
@@ -556,6 +564,7 @@ export async function runContainerAgent(
     let parseBuffer = '';
     let newSessionId: string | undefined;
     let outputChain = Promise.resolve();
+    const streamedResults: string[] = [];
 
     worker.stdout.on('data', (data) => {
       const chunk = data.toString();
@@ -591,6 +600,13 @@ export async function runContainerAgent(
           const parsed: ContainerOutput = JSON.parse(jsonStr);
           if (parsed.newSessionId) {
             newSessionId = parsed.newSessionId;
+          }
+          if (parsed.result) {
+            const rawResult =
+              typeof parsed.result === 'string'
+                ? parsed.result
+                : JSON.stringify(parsed.result);
+            streamedResults.push(rawResult);
           }
           hadStreamingOutput = true;
           resetTimeout();
@@ -647,13 +663,14 @@ export async function runContainerAgent(
       const duration = Date.now() - startTime;
 
       if (timedOut) {
-        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        const now = new Date();
+        const ts = formatLocalTimestampForFilename(now);
         const timeoutLog = path.join(logsDir, `worker-${ts}.log`);
         fs.writeFileSync(
           timeoutLog,
           [
             '=== Agent Run Log (TIMEOUT) ===',
-            `Timestamp: ${new Date().toISOString()}`,
+            `Timestamp: ${formatLocalIsoTimestamp(now)}`,
             `Group: ${group.name}`,
             `Execution: ${executionName}`,
             `Duration: ${duration}ms`,
@@ -685,13 +702,24 @@ export async function runContainerAgent(
         return;
       }
 
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const now = new Date();
+      const timestamp = formatLocalTimestampForFilename(now);
       const logFile = path.join(logsDir, `worker-${timestamp}.log`);
       const isVerbose =
         process.env.LOG_LEVEL === 'debug' || process.env.LOG_LEVEL === 'trace';
+      const MAX_WORKER_LOG_TEXT = 8000;
+      const promptPreview =
+        input.prompt.length > MAX_WORKER_LOG_TEXT
+          ? `${input.prompt.slice(0, MAX_WORKER_LOG_TEXT)}\n[TRUNCATED]`
+          : input.prompt;
+      const resultPreviewRaw = streamedResults.join('\n\n---\n\n');
+      const resultPreview =
+        resultPreviewRaw.length > MAX_WORKER_LOG_TEXT
+          ? `${resultPreviewRaw.slice(0, MAX_WORKER_LOG_TEXT)}\n[TRUNCATED]`
+          : resultPreviewRaw;
       const logLines = [
         '=== Agent Run Log ===',
-        `Timestamp: ${new Date().toISOString()}`,
+        `Timestamp: ${formatLocalIsoTimestamp(now)}`,
         `Group: ${group.name}`,
         `IsMain: ${input.isMain}`,
         `Duration: ${duration}ms`,
@@ -731,6 +759,14 @@ export async function runContainerAgent(
           layout.writableRoots.join('\n') || '(none)',
           '',
         );
+
+        if (input.workerLogDetail?.includePrompt === true) {
+          logLines.push('=== Prompt ===', promptPreview || '(empty)', '');
+        }
+
+        if (input.workerLogDetail?.includeResult === true) {
+          logLines.push('=== Result ===', resultPreview || '(no result)', '');
+        }
       }
 
       fs.writeFileSync(logFile, logLines.join('\n'));

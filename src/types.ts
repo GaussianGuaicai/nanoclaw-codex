@@ -40,6 +40,7 @@ export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
   mcpServers?: Record<string, RemoteMcpServerConfig>;
+  agentConfig?: AgentExecutionSourceConfig;
 }
 
 export interface RegisteredGroup {
@@ -76,6 +77,7 @@ export interface ScheduledTask {
   last_result: string | null;
   status: 'active' | 'paused' | 'completed';
   created_at: string;
+  agent_config?: AgentExecutionConfig;
 }
 
 export interface TaskRunLog {
@@ -117,7 +119,31 @@ export type OnChatMetadata = (
 ) => void;
 
 export type EventExecutionContextMode = 'group' | 'isolated';
+export type AgentTaskSource = 'chat' | 'scheduled' | 'websocket';
 export type WebSocketProviderName = string;
+export type AgentModelReasoningEffort =
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh';
+
+export interface AgentExecutionConfig {
+  model?: string;
+  reasoningEffort?: AgentModelReasoningEffort;
+  codexConfigOverrides?: Record<string, unknown>;
+}
+
+export interface AgentExecutionSourceConfig {
+  defaults?: AgentExecutionConfig;
+  bySource?: Partial<Record<AgentTaskSource, AgentExecutionConfig>>;
+}
+
+export type AgentExecutionConfigScope =
+  | 'global'
+  | 'group'
+  | 'websocket'
+  | 'task';
 
 export type WebSocketMatchValue = string | number | boolean | null;
 export type WebSocketFilterOperator =
@@ -170,6 +196,7 @@ export interface WebSocketSubscriptionConfig {
   contextMode?: EventExecutionContextMode;
   deliverOutput?: boolean;
   cooldownMs?: number;
+  agentConfig?: AgentExecutionConfig;
 }
 
 export interface WebSocketSourcesConfig {

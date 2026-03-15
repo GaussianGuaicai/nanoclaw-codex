@@ -4,11 +4,11 @@ import path from 'path';
 
 import { z } from 'zod';
 
+import { agentExecutionConfigSchema } from '../agent-config.js';
 import { WEBSOCKET_SOURCES_PATH } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import {
-  WebSocketFilterRule,
   WebSocketConnectionConfig,
   WebSocketSourcesConfig,
   WebSocketSubscriptionConfig,
@@ -110,11 +110,7 @@ const subscriptionSchema = z.object({
   contextMode: z.enum(['group', 'isolated']).optional(),
   deliverOutput: z.boolean().optional(),
   cooldownMs: z.number().int().nonnegative().optional(),
-});
-
-const configSchema = z.object({
-  connections: z.record(z.string(), connectionSchema).default({}),
-  subscriptions: z.array(subscriptionSchema).default([]),
+  agentConfig: agentExecutionConfigSchema.optional(),
 });
 
 export interface ResolvedWebSocketConnectionConfig extends WebSocketConnectionConfig {
@@ -137,7 +133,7 @@ function resolveUserPath(inputPath: string): string {
 }
 
 export function loadWebSocketSourcesConfig(): LoadedWebSocketSourcesConfig {
-  let parsed: WebSocketSourcesConfig = { connections: {}, subscriptions: [] };
+  let raw: unknown = { connections: {}, subscriptions: [] };
 
   if (!fs.existsSync(WEBSOCKET_SOURCES_PATH)) {
     logger.info(
@@ -148,8 +144,7 @@ export function loadWebSocketSourcesConfig(): LoadedWebSocketSourcesConfig {
   }
 
   try {
-    const raw = JSON.parse(fs.readFileSync(WEBSOCKET_SOURCES_PATH, 'utf-8'));
-    parsed = configSchema.parse(raw);
+    raw = JSON.parse(fs.readFileSync(WEBSOCKET_SOURCES_PATH, 'utf-8'));
   } catch (err) {
     logger.error(
       { err, path: WEBSOCKET_SOURCES_PATH },
@@ -158,9 +153,54 @@ export function loadWebSocketSourcesConfig(): LoadedWebSocketSourcesConfig {
     return { connections: {}, subscriptions: [] };
   }
 
+  const root = z
+    .object({
+      connections: z.record(z.string(), z.unknown()).default({}),
+      subscriptions: z.array(z.unknown()).default([]),
+    })
+    .safeParse(raw);
+  if (!root.success) {
+    logger.error(
+      { path: WEBSOCKET_SOURCES_PATH, issues: root.error.issues },
+      'Invalid WS source config root',
+    );
+    return { connections: {}, subscriptions: [] };
+  }
+
+  const parsedConnections: WebSocketSourcesConfig['connections'] = {};
+  for (const [name, value] of Object.entries(root.data.connections)) {
+    const parsedConnection = connectionSchema.safeParse(value);
+    if (!parsedConnection.success) {
+      logger.error(
+        {
+          connection: name,
+          issues: parsedConnection.error.issues,
+        },
+        'Skipping invalid WS connection',
+      );
+      continue;
+    }
+    parsedConnections[name] = parsedConnection.data;
+  }
+
+  const parsedSubscriptions: WebSocketSourcesConfig['subscriptions'] = [];
+  for (const value of root.data.subscriptions) {
+    const parsedSubscription = subscriptionSchema.safeParse(value);
+    if (!parsedSubscription.success) {
+      logger.error(
+        {
+          issues: parsedSubscription.error.issues,
+        },
+        'Skipping invalid WS subscription',
+      );
+      continue;
+    }
+    parsedSubscriptions.push(parsedSubscription.data);
+  }
+
   const envKeys = Array.from(
     new Set(
-      Object.values(parsed.connections).flatMap((connection) => [
+      Object.values(parsedConnections).flatMap((connection) => [
         connection.urlEnvVar,
         connection.tokenEnvVar,
       ]),
@@ -169,7 +209,7 @@ export function loadWebSocketSourcesConfig(): LoadedWebSocketSourcesConfig {
 
   const envFromFile = readEnvFile(envKeys);
   const connections: Record<string, ResolvedWebSocketConnectionConfig> = {};
-  const subscriptions = parsed.subscriptions.map((subscription) => {
+  const subscriptions = parsedSubscriptions.map((subscription) => {
     if (!subscription.taskInstructionsPath) {
       return subscription;
     }
@@ -210,7 +250,7 @@ export function loadWebSocketSourcesConfig(): LoadedWebSocketSourcesConfig {
     }
   });
 
-  for (const [name, connection] of Object.entries(parsed.connections)) {
+  for (const [name, connection] of Object.entries(parsedConnections)) {
     const url =
       process.env[connection.urlEnvVar] || envFromFile[connection.urlEnvVar];
     const token =

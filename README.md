@@ -71,6 +71,31 @@ HOME_ASSISTANT_URL=https://your-home-assistant.example
 HASS_ACCESS_TOKEN=your-home-assistant-token
 ```
 
+Optional structured model config (higher priority than legacy env):
+
+```text
+~/.config/nanoclaw/agent-config.json
+```
+
+Example:
+
+```json
+{
+  "defaults": {
+    "model": "gpt-5-codex",
+    "reasoningEffort": "medium"
+  },
+  "bySource": {
+    "websocket": {
+      "reasoningEffort": "low"
+    }
+  }
+}
+```
+
+Precedence:
+`task override > source override > group config > global config > legacy env > SDK default`
+
 Per-group Codex state lives under `data/sessions/{group}/.codex`. That directory is used as `CODEX_HOME`, so each group gets isolated session history, auth state, logs, and local Codex metadata.
 
 ## Remote MCP and Event Sources

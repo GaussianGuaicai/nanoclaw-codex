@@ -3,6 +3,7 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
+import { agentExecutionConfigSchema } from './agent-config.js';
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
@@ -161,6 +162,7 @@ export async function processTaskIpc(
     schedule_type?: string;
     schedule_value?: string;
     context_mode?: string;
+    agent_config?: unknown;
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
@@ -254,6 +256,23 @@ export async function processTaskIpc(
           data.context_mode === 'group' || data.context_mode === 'isolated'
             ? data.context_mode
             : 'isolated';
+        const parsedAgentConfig = agentExecutionConfigSchema.safeParse(
+          data.agent_config,
+        );
+        if (!parsedAgentConfig.success && data.agent_config !== undefined) {
+          logger.warn(
+            {
+              sourceGroup,
+              targetFolder,
+              errors: parsedAgentConfig.error.issues.map((issue) => ({
+                path: issue.path.join('.') || '<root>',
+                message: issue.message,
+              })),
+            },
+            'Invalid schedule_task agent_config; task creation rejected',
+          );
+          break;
+        }
         createTask({
           id: taskId,
           group_folder: targetFolder,
@@ -262,6 +281,9 @@ export async function processTaskIpc(
           schedule_type: scheduleType,
           schedule_value: data.schedule_value,
           context_mode: contextMode,
+          agent_config: parsedAgentConfig.success
+            ? parsedAgentConfig.data
+            : undefined,
           next_run: nextRun,
           status: 'active',
           created_at: new Date().toISOString(),

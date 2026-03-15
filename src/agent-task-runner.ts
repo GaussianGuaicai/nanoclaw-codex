@@ -2,6 +2,7 @@ import { ChildProcess } from 'child_process';
 
 import { ASSISTANT_NAME } from './config.js';
 import { setSession, getAllTasks } from './db.js';
+import { resolveAgentExecutionConfig } from './agent-config.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -9,6 +10,8 @@ import {
 } from './container-runner.js';
 import { GroupQueue } from './group-queue.js';
 import {
+  AgentExecutionConfig,
+  AgentTaskSource,
   EventExecutionContextMode,
   RegisteredGroup,
   ScheduledTask,
@@ -30,6 +33,8 @@ export interface AgentTaskRequest {
   chatJid: string;
   prompt: string;
   contextMode: EventExecutionContextMode;
+  source: AgentTaskSource;
+  agentConfigOverride?: AgentExecutionConfig;
   deliverOutput?: boolean;
   logWorkerInputOutput?: boolean;
   isScheduledTask?: boolean;
@@ -65,6 +70,20 @@ export async function runSingleTurnAgentTask(
   request: AgentTaskRequest,
   deps: AgentTaskRunnerDeps,
 ): Promise<AgentTaskResult> {
+  const resolvedAgentConfig = resolveAgentExecutionConfig({
+    source: request.source,
+    group,
+    taskOverride: request.agentConfigOverride,
+  });
+  if (!resolvedAgentConfig.ok) {
+    const message = `Agent config error (${resolvedAgentConfig.scope}): ${resolvedAgentConfig.error}`;
+    return {
+      status: 'error',
+      result: null,
+      error: message,
+    };
+  }
+
   const isMain = group.isMain === true;
   const sessions = deps.getSessions();
   const sessionId =
@@ -117,6 +136,7 @@ export async function runSingleTurnAgentTask(
         groupFolder: group.folder,
         chatJid: request.chatJid,
         isMain,
+        agentConfig: resolvedAgentConfig.config,
         isScheduledTask: request.isScheduledTask,
         assistantName: request.assistantName || ASSISTANT_NAME,
         workerLogDetail:

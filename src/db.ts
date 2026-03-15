@@ -44,6 +44,7 @@ function createSchema(database: Database.Database): void {
       prompt TEXT NOT NULL,
       schedule_type TEXT NOT NULL,
       schedule_value TEXT NOT NULL,
+      agent_config TEXT,
       next_run TEXT,
       last_run TEXT,
       last_result TEXT,
@@ -89,6 +90,13 @@ function createSchema(database: Database.Database): void {
     database.exec(
       `ALTER TABLE scheduled_tasks ADD COLUMN context_mode TEXT DEFAULT 'isolated'`,
     );
+  } catch {
+    /* column already exists */
+  }
+
+  // Add agent_config column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN agent_config TEXT`);
   } catch {
     /* column already exists */
   }
@@ -358,8 +366,8 @@ export function createTask(
 ): void {
   db.prepare(
     `
-    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, agent_config, next_run, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     task.id,
@@ -369,6 +377,7 @@ export function createTask(
     task.schedule_type,
     task.schedule_value,
     task.context_mode || 'isolated',
+    task.agent_config ? JSON.stringify(task.agent_config) : null,
     task.next_run,
     task.status,
     task.created_at,
@@ -376,23 +385,26 @@ export function createTask(
 }
 
 export function getTaskById(id: string): ScheduledTask | undefined {
-  return db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id) as
-    | ScheduledTask
-    | undefined;
+  const row = db
+    .prepare('SELECT * FROM scheduled_tasks WHERE id = ?')
+    .get(id) as ScheduledTaskRow | undefined;
+  return row ? parseScheduledTaskRow(row) : undefined;
 }
 
 export function getTasksForGroup(groupFolder: string): ScheduledTask[] {
-  return db
+  const rows = db
     .prepare(
       'SELECT * FROM scheduled_tasks WHERE group_folder = ? ORDER BY created_at DESC',
     )
-    .all(groupFolder) as ScheduledTask[];
+    .all(groupFolder) as ScheduledTaskRow[];
+  return rows.map(parseScheduledTaskRow);
 }
 
 export function getAllTasks(): ScheduledTask[] {
-  return db
+  const rows = db
     .prepare('SELECT * FROM scheduled_tasks ORDER BY created_at DESC')
-    .all() as ScheduledTask[];
+    .all() as ScheduledTaskRow[];
+  return rows.map(parseScheduledTaskRow);
 }
 
 export function updateTask(
@@ -444,7 +456,7 @@ export function deleteTask(id: string): void {
 
 export function getDueTasks(): ScheduledTask[] {
   const now = new Date().toISOString();
-  return db
+  const rows = db
     .prepare(
       `
     SELECT * FROM scheduled_tasks
@@ -452,7 +464,8 @@ export function getDueTasks(): ScheduledTask[] {
     ORDER BY next_run
   `,
     )
-    .all(now) as ScheduledTask[];
+    .all(now) as ScheduledTaskRow[];
+  return rows.map(parseScheduledTaskRow);
 }
 
 export function updateTaskAfterRun(
@@ -468,6 +481,41 @@ export function updateTaskAfterRun(
     WHERE id = ?
   `,
   ).run(nextRun, now, lastResult, nextRun, id);
+}
+
+interface ScheduledTaskRow {
+  id: string;
+  group_folder: string;
+  chat_jid: string;
+  prompt: string;
+  schedule_type: 'cron' | 'interval' | 'once';
+  schedule_value: string;
+  context_mode: 'group' | 'isolated';
+  agent_config: string | null;
+  next_run: string | null;
+  last_run: string | null;
+  last_result: string | null;
+  status: 'active' | 'paused' | 'completed';
+  created_at: string;
+}
+
+function parseScheduledTaskRow(row: ScheduledTaskRow): ScheduledTask {
+  let agentConfig: ScheduledTask['agent_config'];
+  if (row.agent_config) {
+    try {
+      agentConfig = JSON.parse(row.agent_config);
+    } catch {
+      logger.warn(
+        { taskId: row.id },
+        'Ignoring invalid scheduled task agent_config JSON',
+      );
+    }
+  }
+
+  return {
+    ...row,
+    agent_config: agentConfig,
+  };
 }
 
 export function logTaskRun(log: TaskRunLog): void {

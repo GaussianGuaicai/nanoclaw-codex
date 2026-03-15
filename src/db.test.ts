@@ -343,6 +343,10 @@ describe('task CRUD', () => {
       schedule_type: 'once',
       schedule_value: '2024-06-01T00:00:00.000Z',
       context_mode: 'isolated',
+      agent_config: {
+        model: 'gpt-5-codex',
+        reasoningEffort: 'low',
+      },
       next_run: '2024-06-01T00:00:00.000Z',
       status: 'active',
       created_at: '2024-01-01T00:00:00.000Z',
@@ -352,6 +356,10 @@ describe('task CRUD', () => {
     expect(task).toBeDefined();
     expect(task!.prompt).toBe('do something');
     expect(task!.status).toBe('active');
+    expect(task!.agent_config).toEqual({
+      model: 'gpt-5-codex',
+      reasoningEffort: 'low',
+    });
   });
 
   it('updates task status', () => {

@@ -1,3 +1,16 @@
+export type AgentModelReasoningEffort =
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh';
+
+export interface AgentExecutionConfig {
+  model?: string;
+  reasoningEffort?: AgentModelReasoningEffort;
+  codexConfigOverrides?: Record<string, unknown>;
+}
+
 export interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -6,6 +19,7 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  agentConfig?: AgentExecutionConfig;
   remoteMcpServers?: Record<
     string,
     {

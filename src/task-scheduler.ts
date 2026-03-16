@@ -130,6 +130,8 @@ async function runTask(
       chatJid: task.chat_jid,
       prompt: task.prompt,
       contextMode: task.context_mode,
+      source: 'scheduled',
+      agentConfigOverride: task.agent_config,
       deliverOutput: true,
       isScheduledTask: true,
       assistantName: ASSISTANT_NAME,

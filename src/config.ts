@@ -39,6 +39,12 @@ export const WEBSOCKET_SOURCES_PATH = path.join(
   'nanoclaw',
   'websocket-sources.json',
 );
+export const AGENT_CONFIG_PATH = path.join(
+  HOME_DIR,
+  '.config',
+  'nanoclaw',
+  'agent-config.json',
+);
 export const LOGS_DIR = path.resolve(PROJECT_ROOT, 'logs');
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');

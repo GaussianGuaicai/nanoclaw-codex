@@ -216,4 +216,49 @@ describe('loadWebSocketSourcesConfig', () => {
       'Use my quiet-hours preference.',
     );
   });
+
+  it('skips invalid subscriptions but keeps valid ones', () => {
+    fs.writeFileSync(
+      testConfigPath,
+      JSON.stringify({
+        connections: {
+          ha_main: {
+            provider: 'home_assistant',
+            urlEnvVar: 'TEST_HA_URL',
+            tokenEnvVar: 'TEST_HA_TOKEN',
+          },
+        },
+        subscriptions: [
+          {
+            id: 'invalid-subscription',
+            connection: 'ha_main',
+            kind: 'events',
+            eventType: 'state_changed',
+            targetJid: 'slack:C123',
+            promptTemplate: 'Handle {{event_type}}',
+            agentConfig: {
+              reasoningEffort: 'broken',
+            },
+          },
+          {
+            id: 'valid-subscription',
+            connection: 'ha_main',
+            kind: 'events',
+            eventType: 'state_changed',
+            targetJid: 'slack:C456',
+            promptTemplate: 'Handle {{event_type}}',
+          },
+        ],
+      }),
+    );
+
+    readEnvFileMock.mockReturnValue({
+      TEST_HA_URL: 'http://127.0.0.1:8123',
+      TEST_HA_TOKEN: 'secret-token',
+    });
+
+    const loaded = loadWebSocketSourcesConfig();
+    expect(loaded.subscriptions).toHaveLength(1);
+    expect(loaded.subscriptions[0].id).toBe('valid-subscription');
+  });
 });

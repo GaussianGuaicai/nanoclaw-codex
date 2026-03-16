@@ -43,10 +43,19 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
+import {
+  initializeGlobalAgentConfig,
+  resolveAgentExecutionConfig,
+} from './agent-config.js';
 import { runSingleTurnAgentTask } from './agent-task-runner.js';
 import { WebSocketSourceManager } from './event-sources/manager.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import {
+  AgentExecutionConfig,
+  Channel,
+  NewMessage,
+  RegisteredGroup,
+} from './types.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -297,6 +306,22 @@ async function runAgent(
     : undefined;
 
   try {
+    const resolvedAgentConfig = resolveAgentExecutionConfig({
+      source: 'chat',
+      group,
+    });
+    if (!resolvedAgentConfig.ok) {
+      logger.error(
+        {
+          group: group.name,
+          scope: resolvedAgentConfig.scope,
+          error: resolvedAgentConfig.error,
+        },
+        'Rejecting chat task due to invalid agent config',
+      );
+      return 'error';
+    }
+
     const output = await runContainerAgent(
       group,
       {
@@ -305,6 +330,7 @@ async function runAgent(
         groupFolder: group.folder,
         chatJid,
         isMain,
+        agentConfig: resolvedAgentConfig.config,
         assistantName: ASSISTANT_NAME,
       },
       (proc, executionName) =>
@@ -340,6 +366,7 @@ function enqueueWebSocketEventTask(params: {
   contextMode: 'group' | 'isolated';
   deliverOutput: boolean;
   logTaskResult: boolean;
+  agentConfigOverride?: AgentExecutionConfig;
 }): Promise<{
   status: 'success' | 'error';
   result: string | null;
@@ -370,6 +397,8 @@ function enqueueWebSocketEventTask(params: {
           chatJid: params.targetJid,
           prompt: params.prompt,
           contextMode: params.contextMode,
+          source: 'websocket',
+          agentConfigOverride: params.agentConfigOverride,
           deliverOutput: params.deliverOutput,
           logWorkerInputOutput: params.logTaskResult,
           assistantName: ASSISTANT_NAME,
@@ -542,6 +571,7 @@ function recoverPendingMessages(): void {
 async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
+  initializeGlobalAgentConfig();
   loadState();
 
   // Graceful shutdown handlers
@@ -656,6 +686,7 @@ async function main(): Promise<void> {
         contextMode: subscription.contextMode || 'isolated',
         deliverOutput: subscription.deliverOutput === true,
         logTaskResult: subscription.logTaskResult === true,
+        agentConfigOverride: subscription.agentConfig,
       });
     },
   });

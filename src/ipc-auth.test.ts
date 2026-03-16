@@ -633,6 +633,53 @@ describe('schedule_task context_mode', () => {
     const tasks = getAllTasks();
     expect(tasks[0].context_mode).toBe('isolated');
   });
+
+  it('rejects invalid agent_config override', async () => {
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'bad override',
+        schedule_type: 'once',
+        schedule_value: '2025-06-01T00:00:00.000Z',
+        targetJid: 'other@g.us',
+        agent_config: {
+          reasoningEffort: 'broken',
+        },
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    const tasks = getAllTasks();
+    expect(tasks).toHaveLength(0);
+  });
+
+  it('persists valid agent_config override on scheduled task', async () => {
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'custom model task',
+        schedule_type: 'once',
+        schedule_value: '2025-06-01T00:00:00.000Z',
+        targetJid: 'other@g.us',
+        agent_config: {
+          model: 'gpt-5-codex',
+          reasoningEffort: 'low',
+        },
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    const tasks = getAllTasks();
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].agent_config).toEqual({
+      model: 'gpt-5-codex',
+      reasoningEffort: 'low',
+    });
+  });
 });
 
 // --- register_group success path ---

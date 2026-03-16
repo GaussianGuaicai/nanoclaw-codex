@@ -61,6 +61,7 @@ Use `config-examples/websocket-sources.home-assistant.json` as a Home Assistant-
 - `contextMode`: `"isolated"` or `"group"`
 - `deliverOutput`: whether the task result should be sent back to the target chat; when enabled NanoClaw also adds a generic user-visible reply contract to the task prompt
 - `cooldownMs`: optional per-subscription suppression window
+- `agentConfig`: optional per-subscription model override `{ model?, reasoningEffort?, codexConfigOverrides? }`
 
 ## Prompt template variables
 

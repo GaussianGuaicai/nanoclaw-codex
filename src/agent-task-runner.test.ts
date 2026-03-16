@@ -5,11 +5,16 @@ const {
   writeTasksSnapshotMock,
   setSessionMock,
   getAllTasksMock,
+  resolveAgentExecutionConfigMock,
 } = vi.hoisted(() => ({
   runContainerAgentMock: vi.fn(),
   writeTasksSnapshotMock: vi.fn(),
   setSessionMock: vi.fn(),
   getAllTasksMock: vi.fn(() => []),
+  resolveAgentExecutionConfigMock: vi.fn(() => ({
+    ok: true,
+    config: { model: 'gpt-5-codex' },
+  })) as any,
 }));
 
 vi.mock('./container-runner.js', () => ({
@@ -21,12 +26,19 @@ vi.mock('./db.js', () => ({
   setSession: setSessionMock,
   getAllTasks: getAllTasksMock,
 }));
+vi.mock('./agent-config.js', () => ({
+  resolveAgentExecutionConfig: resolveAgentExecutionConfigMock,
+}));
 
 import { runSingleTurnAgentTask } from './agent-task-runner.js';
 
 describe('runSingleTurnAgentTask', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resolveAgentExecutionConfigMock.mockReturnValue({
+      ok: true,
+      config: { model: 'gpt-5-codex' },
+    });
   });
 
   it('does not persist session updates for isolated context', async () => {
@@ -44,6 +56,7 @@ describe('runSingleTurnAgentTask', () => {
         chatJid: 'chat@g.us',
         prompt: 'ping',
         contextMode: 'isolated',
+        source: 'scheduled',
       },
       {
         getSessions: () => sessions,
@@ -85,6 +98,7 @@ describe('runSingleTurnAgentTask', () => {
         chatJid: 'chat@g.us',
         prompt: 'ping',
         contextMode: 'group',
+        source: 'scheduled',
       },
       {
         getSessions: () => sessions,
@@ -104,5 +118,35 @@ describe('runSingleTurnAgentTask', () => {
       'streamed-session',
     );
     expect(setSessionMock).toHaveBeenNthCalledWith(2, 'team', 'final-session');
+  });
+
+  it('fails fast when resolved agent config is invalid', async () => {
+    resolveAgentExecutionConfigMock.mockReturnValueOnce({
+      ok: false,
+      scope: 'task',
+      error: 'bad override',
+    });
+
+    const result = await runSingleTurnAgentTask(
+      { folder: 'team', isMain: false } as any,
+      {
+        chatJid: 'chat@g.us',
+        prompt: 'ping',
+        contextMode: 'isolated',
+        source: 'scheduled',
+      },
+      {
+        getSessions: () => ({}),
+        onProcess: () => {},
+        queue: {
+          closeStdin: vi.fn(),
+          notifyIdle: vi.fn(),
+        } as any,
+      },
+    );
+
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('Agent config error (task)');
+    expect(runContainerAgentMock).not.toHaveBeenCalled();
   });
 });

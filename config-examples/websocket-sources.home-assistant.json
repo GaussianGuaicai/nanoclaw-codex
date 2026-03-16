@@ -44,6 +44,9 @@
       "targetJid": "slack:C0123456789",
       "promptTemplate": "Home Assistant event {{event_type}} fired at {{time_fired}}.\nEvaluate the event payload and decide whether to notify or trigger follow-up automation.\n\n{{event_json}}",
       "contextMode": "isolated",
+      "agentConfig": {
+        "reasoningEffort": "low"
+      },
       "deliverOutput": true,
       "cooldownMs": 10000
     }

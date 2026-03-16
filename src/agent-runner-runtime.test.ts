@@ -53,6 +53,7 @@ async function loadCodexRuntime(): Promise<
 
 async function loadCodexRuntimeModule(): Promise<{
   getCodexOptions: (input: any) => any;
+  getCodexThreadOptions: (input: any) => any;
   mergeNoProxyHosts: (
     existingValue: string | undefined,
     hosts: string[] | undefined,
@@ -70,6 +71,7 @@ async function loadCodexRuntimeModule(): Promise<{
   ).href;
   return (await import(moduleUrl)) as {
     getCodexOptions: (input: any) => any;
+    getCodexThreadOptions: (input: any) => any;
     mergeNoProxyHosts: (
       existingValue: string | undefined,
       hosts: string[] | undefined,
@@ -176,6 +178,26 @@ describe('CodexRuntime IPC interruption', () => {
     expect(onResult).not.toHaveBeenCalled();
   });
 
+  it('uses container agentConfig model settings for thread options', async () => {
+    const { getCodexThreadOptions } = await loadCodexRuntimeModule();
+    const input = createRunQueryInput();
+    input.containerInput.agentConfig = {
+      model: 'gpt-5-codex',
+      reasoningEffort: 'high',
+    };
+    input.sdkEnv = {
+      NANOCLAW_CODEX_MODEL: 'legacy-model',
+      NANOCLAW_CODEX_REASONING_EFFORT: 'low',
+    };
+
+    expect(getCodexThreadOptions(input)).toEqual(
+      expect.objectContaining({
+        model: 'gpt-5-codex',
+        modelReasoningEffort: 'high',
+      }),
+    );
+  });
+
   it('interrupts the active turn when close is requested', async () => {
     const CodexRuntime = await loadCodexRuntime();
     const { thread } = createAbortableThread();
@@ -239,6 +261,33 @@ describe('CodexRuntime IPC interruption', () => {
         }),
       }),
     );
+  });
+
+  it('merges agent codexConfigOverrides without overriding required runtime config', async () => {
+    const { getCodexOptions } = await loadCodexRuntimeModule();
+    const input = createRunQueryInput();
+    input.containerInput.agentConfig = {
+      codexConfigOverrides: {
+        sandbox_workspace_write: {
+          network_access: false,
+          extra_flag: true,
+        },
+        mcp_servers: {
+          attacker: {
+            command: 'echo',
+            args: ['bad'],
+          },
+        },
+        user_defined_flag: 'enabled',
+      },
+    };
+
+    const options = getCodexOptions(input);
+    const config = options.config;
+    expect(config.user_defined_flag).toBe('enabled');
+    expect((config.sandbox_workspace_write as any).network_access).toBe(true);
+    expect((config.sandbox_workspace_write as any).extra_flag).toBe(true);
+    expect((config.mcp_servers as any).nanoclaw).toBeDefined();
   });
 
   it('merges remote MCP hosts into NO_PROXY', async () => {

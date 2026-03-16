@@ -21,7 +21,11 @@ import {
   formatLocalIsoTimestamp,
   formatLocalTimestampForFilename,
 } from './time.js';
-import { RegisteredGroup, RemoteMcpServerConfig } from './types.js';
+import {
+  AgentExecutionConfig,
+  RegisteredGroup,
+  RemoteMcpServerConfig,
+} from './types.js';
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
@@ -44,6 +48,7 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  agentConfig?: AgentExecutionConfig;
   runtimePaths?: AgentRuntimePaths;
   remoteMcpServers?: Record<string, RemoteMcpServerConfig>;
   remoteMcpNoProxyHosts?: string[];

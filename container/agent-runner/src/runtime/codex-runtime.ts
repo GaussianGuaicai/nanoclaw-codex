@@ -24,7 +24,31 @@ function parseBool(value: string | undefined, defaultValue: boolean): boolean {
   return defaultValue;
 }
 
-function getCodexThreadOptions(input: RunQueryInput): ThreadOptions {
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value)
+  );
+}
+
+function deepMergeConfig(
+  lowerPriority: Record<string, unknown>,
+  higherPriority: Record<string, unknown>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...lowerPriority };
+  for (const [key, value] of Object.entries(higherPriority)) {
+    const existing = result[key];
+    if (isPlainObject(existing) && isPlainObject(value)) {
+      result[key] = deepMergeConfig(existing, value);
+      continue;
+    }
+    result[key] = value;
+  }
+  return result;
+}
+
+export function getCodexThreadOptions(input: RunQueryInput): ThreadOptions {
   const { sdkEnv, containerInput } = input;
   const runtimePaths = containerInput.runtimePaths;
   if (!runtimePaths) {
@@ -51,8 +75,9 @@ function getCodexThreadOptions(input: RunQueryInput): ThreadOptions {
     webSearchMode:
       (sdkEnv.NANOCLAW_CODEX_WEB_SEARCH_MODE as ThreadOptions['webSearchMode']) ||
       'disabled',
-    model: sdkEnv.NANOCLAW_CODEX_MODEL,
+    model: containerInput.agentConfig?.model || sdkEnv.NANOCLAW_CODEX_MODEL,
     modelReasoningEffort:
+      (containerInput.agentConfig?.reasoningEffort as ThreadOptions['modelReasoningEffort']) ||
       (sdkEnv.NANOCLAW_CODEX_REASONING_EFFORT as ThreadOptions['modelReasoningEffort']) ||
       undefined,
   };
@@ -202,28 +227,33 @@ export function getCodexOptions(input: RunQueryInput): CodexOptions {
     ...remoteMcpServers,
   };
 
+  const baseConfig: Record<string, unknown> = {
+    mcp_servers: mcpServers,
+    sandbox_workspace_write: {
+      writable_roots: runtimePaths.writableRoots,
+      network_access: parseBool(sdkEnv.NANOCLAW_CODEX_NETWORK_ACCESS, true),
+    },
+    ...(skillConfigs.length > 0
+      ? {
+          skills: {
+            config: skillConfigs,
+          },
+        }
+      : {}),
+    ...(sharedInstructions
+      ? {
+          developer_instructions: sharedInstructions,
+        }
+      : {}),
+  };
+  const userConfig = isPlainObject(containerInput.agentConfig?.codexConfigOverrides)
+    ? containerInput.agentConfig?.codexConfigOverrides
+    : {};
+
   return {
     ...(sdkEnv.OPENAI_API_KEY ? { apiKey: sdkEnv.OPENAI_API_KEY } : {}),
     baseUrl: sdkEnv.OPENAI_BASE_URL,
-    config: {
-      mcp_servers: mcpServers,
-      sandbox_workspace_write: {
-        writable_roots: runtimePaths.writableRoots,
-        network_access: parseBool(sdkEnv.NANOCLAW_CODEX_NETWORK_ACCESS, true),
-      },
-      ...(skillConfigs.length > 0
-        ? {
-            skills: {
-              config: skillConfigs,
-            },
-          }
-        : {}),
-      ...(sharedInstructions
-        ? {
-            developer_instructions: sharedInstructions,
-          }
-        : {}),
-    },
+    config: deepMergeConfig(userConfig, baseConfig),
   };
 }
 

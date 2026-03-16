@@ -462,4 +462,41 @@ describe('container-runner worker execution', () => {
     );
     expect(result.status).toBe('success');
   });
+
+  it('passes agentConfig through to worker input', async () => {
+    const stdinChunks: Buffer[] = [];
+    fakeProc.stdin.on('data', (chunk: Buffer) => stdinChunks.push(chunk));
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        agentConfig: {
+          model: 'gpt-5-codex',
+          reasoningEffort: 'low',
+          codexConfigOverrides: {
+            user_flag: true,
+          },
+        },
+      },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'ok',
+      newSessionId: 'session-agent-config',
+    });
+    fakeProc.emit('close', 0);
+    await resultPromise;
+
+    const workerInput = JSON.parse(Buffer.concat(stdinChunks).toString('utf8'));
+    expect(workerInput.agentConfig).toEqual({
+      model: 'gpt-5-codex',
+      reasoningEffort: 'low',
+      codexConfigOverrides: {
+        user_flag: true,
+      },
+    });
+  });
 });

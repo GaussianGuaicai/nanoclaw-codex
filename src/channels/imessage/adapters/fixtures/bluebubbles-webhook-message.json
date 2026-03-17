@@ -1,0 +1,10 @@
+{
+  "guid": "msg-123",
+  "chatGuid": "iMessage;+;chat123",
+  "text": "hello from webhook",
+  "dateCreated": 1710000000000,
+  "handle": "+15550001111",
+  "displayName": "Alice",
+  "isFromMe": false,
+  "type": "text"
+}

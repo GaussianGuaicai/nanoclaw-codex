@@ -21,5 +21,8 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
+      - name: iMessage channel test group
+        run: npx vitest run src/channels/imessage.test.ts src/channels/imessage/adapters/bluebubbles-adapter.test.ts src/channels/slack.test.ts
+
       - name: Tests
         run: npx vitest run

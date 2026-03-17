@@ -21,6 +21,63 @@ interface BlueBubblesChatResponse {
   };
 }
 
+type BlueBubblesInboundSource = 'webhook' | 'websocket';
+
+export function parseBlueBubblesInboundPayload(
+  payload: unknown,
+  source: BlueBubblesInboundSource,
+): IMessageInboundEvent | null {
+  if (!payload || typeof payload !== 'object') return null;
+
+  const record = payload as Record<string, unknown>;
+  const message =
+    source === 'websocket' &&
+    record.data &&
+    typeof record.data === 'object' &&
+    !Array.isArray(record.data)
+      ? (record.data as Record<string, unknown>)
+      : record;
+
+  const platformMessageId = readString(
+    message.guid,
+    message.messageGuid,
+    message.id,
+  );
+  const chatId = readString(message.chatGuid, message.conversationId);
+  const timestampValue = readNumber(
+    message.dateCreated,
+    message.date,
+    Date.now(),
+  );
+
+  if (!platformMessageId || !chatId) return null;
+
+  const sender = readString(
+    message.handle,
+    message.address,
+    message.sender,
+    'unknown',
+  );
+  const senderName = readString(message.displayName, message.senderName);
+  const content = readString(message.text, message.message, '');
+  const attachmentName = readString(message.fileName, message.attachmentName);
+  const isFromMe = readBool(message.isFromMe, message.fromMe);
+  const messageType = parseMessageType(readString(message.type, 'text'));
+
+  return {
+    platformMessageId,
+    chatId,
+    sender,
+    senderName,
+    timestamp: new Date(timestampValue).toISOString(),
+    type: 'message',
+    messageType,
+    content,
+    attachmentName,
+    isFromMe,
+  };
+}
+
 export class BlueBubblesAdapter implements IMessageAdapter {
   private readonly url: string;
   private readonly password: string;
@@ -120,4 +177,50 @@ export class BlueBubblesAdapter implements IMessageAdapter {
 
     return (await response.json()) as T;
   }
+}
+
+function readString(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return '';
+}
+
+function readNumber(...values: unknown[]): number {
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return Date.now();
+}
+
+function readBool(...values: unknown[]): boolean | undefined {
+  for (const value of values) {
+    if (typeof value === 'boolean') return value;
+  }
+  return undefined;
+}
+
+function parseMessageType(
+  value: string,
+): IMessageInboundEvent['messageType'] | undefined {
+  const normalized = value.toLowerCase();
+  if (
+    normalized === 'text' ||
+    normalized === 'image' ||
+    normalized === 'video' ||
+    normalized === 'voice' ||
+    normalized === 'audio' ||
+    normalized === 'attachment' ||
+    normalized === 'sticker' ||
+    normalized === 'location' ||
+    normalized === 'contact' ||
+    normalized === 'system'
+  ) {
+    return normalized;
+  }
+  return undefined;
 }

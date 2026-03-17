@@ -1,0 +1,13 @@
+{
+  "event": "new-message",
+  "data": {
+    "guid": "msg-456",
+    "chatGuid": "iMessage;+;chat456",
+    "message": "photo here",
+    "date": 1710000001000,
+    "address": "+15550002222",
+    "senderName": "Bob",
+    "fromMe": false,
+    "type": "image"
+  }
+}

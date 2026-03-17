@@ -1,9 +1,5 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
-import { readEnvFile } from '../env.js';
-import { logger } from '../logger.js';
 import { ASSISTANT_NAME } from '../config.js';
+import { logger } from '../logger.js';
 import {
   Channel,
   OnChatMetadata,
@@ -11,12 +7,17 @@ import {
   RegisteredGroup,
 } from '../types.js';
 import { ChannelOpts, registerChannel } from './registry.js';
-
-const execFileAsync = promisify(execFile);
-
-interface IMessageConfig {
-  account: string;
-}
+import { BlueBubblesAdapter } from './imessage/adapters/bluebubbles-adapter.js';
+import { SmserverAdapter } from './imessage/adapters/smserver-adapter.js';
+import {
+  IMessageAdapter,
+  IMessageInboundEvent,
+} from './imessage/adapters/types.js';
+import {
+  IMessageBackend,
+  IMessageBackendConfig,
+  loadIMessageConfig,
+} from './imessage/imessage-config.js';
 
 interface IMessageChannelOpts {
   onMessage: OnInboundMessage;
@@ -29,21 +30,37 @@ export class IMessageChannel implements Channel {
 
   private connected = false;
   private readonly opts: IMessageChannelOpts;
-  private readonly config: IMessageConfig;
+  private readonly config: IMessageBackendConfig;
+  private activeBackend: IMessageBackend;
+  private activeAdapter: IMessageAdapter;
 
-  constructor(config: IMessageConfig, opts: IMessageChannelOpts) {
+  constructor(
+    config: IMessageBackendConfig,
+    opts: IMessageChannelOpts,
+    adapter: IMessageAdapter,
+  ) {
     this.config = config;
     this.opts = opts;
+    this.activeBackend = config.backend;
+    this.activeAdapter = adapter;
   }
 
   async connect(): Promise<void> {
-    if (process.platform !== 'darwin') {
-      logger.warn('iMessage channel is only supported on macOS');
+    const connected = await this.tryConnectWithFallback();
+    if (!connected) {
+      this.connected = false;
       return;
     }
 
+    await this.activeAdapter.subscribeInbound((event) => {
+      void this.handleInboundEvent(event);
+    });
+
     this.connected = true;
-    logger.info({ account: this.config.account }, 'iMessage channel connected');
+    logger.info(
+      { channel: this.name, backend: this.activeBackend },
+      'iMessage channel connected',
+    );
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
@@ -55,10 +72,16 @@ export class IMessageChannel implements Channel {
     const chatId = jid.replace(/^im:/, '');
 
     try {
-      await this.sendViaAppleScript(chatId, text);
-      logger.info({ jid, length: text.length }, 'iMessage message sent');
+      await this.activeAdapter.send(chatId, text);
+      logger.info(
+        { jid, length: text.length, backend: this.activeBackend },
+        'iMessage message sent',
+      );
     } catch (err) {
-      logger.error({ jid, err }, 'Failed to send iMessage message');
+      logger.error(
+        { jid, err, backend: this.activeBackend },
+        'Failed to send iMessage message',
+      );
     }
   }
 
@@ -75,65 +98,162 @@ export class IMessageChannel implements Channel {
     logger.info('iMessage channel disconnected');
   }
 
-  // Inbound delivery hook reserved for bridge/poller implementations.
-  // Keeps the same callback flow as other channels: metadata first, then message.
-  handleInboundMessage(chatId: string, sender: string, content: string): void {
-    const jid = `im:${chatId}`;
-    const timestamp = new Date().toISOString();
+  private async handleInboundEvent(event: IMessageInboundEvent): Promise<void> {
+    const jid = `im:${event.chatId}`;
+    const timestamp = event.timestamp;
+    const chatMeta = await this.activeAdapter.resolveChatMeta(event.chatId);
+    const isGroup = chatMeta?.isGroup ?? true;
 
-    this.opts.onChatMetadata(jid, timestamp, undefined, 'imessage', true);
+    this.opts.onChatMetadata(
+      jid,
+      timestamp,
+      chatMeta?.name,
+      'imessage',
+      isGroup,
+    );
 
     const groups = this.opts.registeredGroups();
     if (!groups[jid]) return;
 
+    const senderName = event.senderName || event.sender || 'unknown';
+    const isFromMe =
+      event.isFromMe !== undefined
+        ? event.isFromMe
+        : event.sender === this.config.account;
+
     this.opts.onMessage(jid, {
-      id: `${Date.now()}`,
+      id: event.id,
       chat_jid: jid,
-      sender,
-      sender_name: sender,
-      content,
+      sender: event.sender,
+      sender_name: senderName,
+      content: event.content,
       timestamp,
-      is_from_me: sender === this.config.account,
-      is_bot_message:
-        sender === this.config.account || sender === ASSISTANT_NAME,
+      is_from_me: isFromMe,
+      is_bot_message: isFromMe || senderName === ASSISTANT_NAME,
     });
   }
 
-  private async sendViaAppleScript(
-    chatId: string,
-    text: string,
-  ): Promise<void> {
-    const escapedChatId = escapeAppleScriptString(chatId);
-    const escapedText = escapeAppleScriptString(text);
+  private async tryConnectWithFallback(): Promise<boolean> {
+    const primaryHealthy = await this.connectAndHealthCheck(
+      this.activeBackend,
+      this.activeAdapter,
+    );
+    if (primaryHealthy) return true;
 
-    await execFileAsync('osascript', [
-      '-e',
-      'tell application "Messages"',
-      '-e',
-      `set targetChat to text chat id "${escapedChatId}"`,
-      '-e',
-      `send "${escapedText}" to targetChat`,
-      '-e',
-      'end tell',
-    ]);
+    if (!this.config.fallbackBackend) {
+      logger.error(
+        { channel: this.name, primaryBackend: this.activeBackend },
+        'iMessage primary backend unavailable and no fallback configured',
+      );
+      return false;
+    }
+
+    const fallbackAdapter = createAdapter(
+      this.config,
+      this.config.fallbackBackend,
+    );
+    if (!fallbackAdapter) {
+      logger.error(
+        {
+          channel: this.name,
+          primaryBackend: this.activeBackend,
+          fallbackBackend: this.config.fallbackBackend,
+        },
+        'iMessage fallback backend missing required configuration',
+      );
+      return false;
+    }
+
+    logger.warn(
+      {
+        channel: this.name,
+        primaryBackend: this.activeBackend,
+        fallbackBackend: this.config.fallbackBackend,
+      },
+      'iMessage primary backend unhealthy, falling back to secondary backend',
+    );
+
+    const fallbackHealthy = await this.connectAndHealthCheck(
+      this.config.fallbackBackend,
+      fallbackAdapter,
+    );
+    if (!fallbackHealthy) {
+      logger.error(
+        {
+          channel: this.name,
+          primaryBackend: this.activeBackend,
+          fallbackBackend: this.config.fallbackBackend,
+        },
+        'Both iMessage primary and fallback backends are unavailable',
+      );
+      return false;
+    }
+
+    this.activeBackend = this.config.fallbackBackend;
+    this.activeAdapter = fallbackAdapter;
+    return true;
+  }
+
+  private async connectAndHealthCheck(
+    backend: IMessageBackend,
+    adapter: IMessageAdapter,
+  ): Promise<boolean> {
+    try {
+      await adapter.connect();
+      const healthy = await adapter.healthCheck();
+      if (!healthy) {
+        logger.warn(
+          { channel: this.name, backend },
+          'iMessage backend health check failed',
+        );
+      }
+      return healthy;
+    } catch (err) {
+      logger.warn(
+        { channel: this.name, backend, err },
+        'iMessage backend connect/healthcheck threw',
+      );
+      return false;
+    }
   }
 }
 
-function escapeAppleScriptString(value: string): string {
-  return value
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, '\\n');
+function createAdapter(
+  config: IMessageBackendConfig,
+  backend: IMessageBackend,
+): IMessageAdapter | null {
+  if (backend === 'bluebubbles') {
+    if (!config.blueBubbles.url || !config.blueBubbles.password) return null;
+    return new BlueBubblesAdapter({
+      url: config.blueBubbles.url,
+      password: config.blueBubbles.password,
+    });
+  }
+
+  if (backend === 'smserver') {
+    if (!config.smserver.url) return null;
+    return new SmserverAdapter({ url: config.smserver.url });
+  }
+
+  return null;
 }
 
 registerChannel('imessage', (opts: ChannelOpts) => {
-  const env = readEnvFile(['IMESSAGE_ACCOUNT']);
-  const account = process.env.IMESSAGE_ACCOUNT || env.IMESSAGE_ACCOUNT || '';
+  const config = loadIMessageConfig();
 
-  if (!account) {
+  if (!config.account) {
     logger.warn('iMessage: IMESSAGE_ACCOUNT not set');
     return null;
   }
 
-  return new IMessageChannel({ account }, opts);
+  const adapter = createAdapter(config, config.backend);
+  if (!adapter) {
+    logger.warn(
+      { backend: config.backend },
+      'iMessage: selected backend missing required credentials/config',
+    );
+    return null;
+  }
+
+  return new IMessageChannel(config, opts, adapter);
 });

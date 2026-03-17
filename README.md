@@ -139,7 +139,7 @@ The runtime defaults to `workspace-write` sandbox mode with `approval_policy=nev
 - File-based IPC between the host orchestrator and the worker MCP server
 - Per-group remote MCP server attachments
 - Host-side WebSocket event subscriptions with immediate task execution
-- Skill-based channel installation (`$add-whatsapp`, `$add-telegram`, `$add-slack`, `$add-discord`, `$add-gmail`)
+- Skill-based channel installation (`$add-whatsapp`, `$add-telegram`, `$add-slack`, `$add-discord`, `$add-gmail`, `$add-imessage`)
 
 The core intentionally does not bundle channel implementations. Channels are added by skills that patch `src/channels/` and self-register at startup.
 
@@ -176,6 +176,43 @@ npm run service:restart    # repo-local service restart helper
 tail -f logs/nanoclaw.log  # live service log
 tail -f logs/websocket-events-home_assistant.log  # inspect HA event activity
 ```
+
+
+
+### iMessage channel setup (skill-based)
+
+Install with:
+
+```bash
+npx tsx scripts/apply-skill.ts .claude/skills/add-imessage
+```
+
+Minimal `.env` (BlueBubbles):
+
+```bash
+IMESSAGE_ACCOUNT=me@icloud.com
+NANOCLAW_IMESSAGE_BACKEND=bluebubbles
+BLUEBUBBLES_URL=http://127.0.0.1:1234
+BLUEBUBBLES_PASSWORD=replace-me
+# optional fallback
+NANOCLAW_IMESSAGE_FALLBACK_BACKEND=smserver
+SMSERVER_URL=http://127.0.0.1:8741
+```
+
+Sync env and restart:
+
+```bash
+mkdir -p data/env && cp .env data/env/env
+npm run build
+```
+
+Common issues:
+- Channel skipped on boot: missing `IMESSAGE_ACCOUNT` or backend credentials.
+- Primary backend unhealthy: configure `NANOCLAW_IMESSAGE_FALLBACK_BACKEND` and fallback credentials.
+- Duplicate inbound messages: ensure adapter emits stable `platform_message_id`; NanoClaw dedupes by `platform_message_id + chat_id`.
+
+Rollback:
+- Revert the skill commit (or use your skills-engine uninstall/replay flow) and restart NanoClaw.
 
 ## Architecture
 

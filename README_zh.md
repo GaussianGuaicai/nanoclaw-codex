@@ -52,7 +52,7 @@ claude
 
 ## 功能支持
 
-- **多渠道消息** - 通过 WhatsApp、Telegram、Discord、Slack 或 Gmail 与您的助手对话。使用 `/add-whatsapp` 或 `/add-telegram` 等技能添加渠道，可同时运行一个或多个。
+- **多渠道消息** - 通过 WhatsApp、Telegram、Discord、Slack 或 Gmail 与您的助手对话。使用 `/add-whatsapp`、`/add-telegram`、`/add-imessage` 等技能添加渠道，可同时运行一个或多个。
 - **隔离的群组上下文** - 每个群组都拥有独立的 `AGENTS.md` 记忆和隔离的文件系统。它们在各自的容器沙箱中运行，且仅挂载所需的文件系统。
 - **主频道** - 您的私有频道（self-chat），用于管理控制；其他所有群组都完全隔离
 - **计划任务** - 运行 Claude 的周期性作业，并可以给您回发消息
@@ -60,6 +60,43 @@ claude
 - **容器隔离** - 智能体在 Apple Container (macOS) 或 Docker (macOS/Linux) 的沙箱中运行
 - **智能体集群（Agent Swarms）** - 启动多个专业智能体团队，协作完成复杂任务（首个支持此功能的个人 AI 助手）
 - **可选集成** - 通过技能添加 Gmail (`/add-gmail`) 等更多功能
+
+
+
+## iMessage 渠道安装（技能方式）
+
+通过技能安装：
+
+```bash
+npx tsx scripts/apply-skill.ts .claude/skills/add-imessage
+```
+
+最小 `.env`（BlueBubbles 示例）：
+
+```bash
+IMESSAGE_ACCOUNT=me@icloud.com
+NANOCLAW_IMESSAGE_BACKEND=bluebubbles
+BLUEBUBBLES_URL=http://127.0.0.1:1234
+BLUEBUBBLES_PASSWORD=replace-me
+# 可选降级后端
+NANOCLAW_IMESSAGE_FALLBACK_BACKEND=smserver
+SMSERVER_URL=http://127.0.0.1:8741
+```
+
+同步环境并重启：
+
+```bash
+mkdir -p data/env && cp .env data/env/env
+npm run build
+```
+
+常见故障：
+- 启动时渠道被跳过：缺少 `IMESSAGE_ACCOUNT` 或后端凭据。
+- 主后端健康检查失败：配置 `NANOCLAW_IMESSAGE_FALLBACK_BACKEND` 及其凭据。
+- 断线重连后重复消息：确保适配器输出稳定的 `platform_message_id`；系统用 `platform_message_id + chat_id` 去重。
+
+回滚：
+- 回退安装该技能的提交（或使用 skills-engine 的卸载/重放流程），然后重启服务。
 
 ## 使用方法
 

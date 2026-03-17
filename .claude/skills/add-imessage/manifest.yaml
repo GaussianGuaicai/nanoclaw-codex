@@ -1,0 +1,26 @@
+skill: imessage
+version: 1.0.0
+description: "iMessage channel integration with adapter architecture (BlueBubbles preferred, SMServer placeholder)"
+core_version: 0.1.0
+adds:
+  - src/channels/imessage.ts
+  - src/channels/imessage/imessage-config.ts
+  - src/channels/imessage/adapters/types.ts
+  - src/channels/imessage/adapters/bluebubbles-adapter.ts
+  - src/channels/imessage/adapters/smserver-adapter.ts
+modifies:
+  - src/channels/index.ts
+structured:
+  npm_dependencies: {}
+  env_additions:
+    - IMESSAGE_ACCOUNT
+    - NANOCLAW_IMESSAGE_BACKEND
+    - NANOCLAW_IMESSAGE_FALLBACK_BACKEND
+    - BLUEBUBBLES_URL
+    - BLUEBUBBLES_PASSWORD
+    - SMSERVER_URL
+    - IMESSAGE_BACKEND_URL
+    - IMESSAGE_AUTH_TOKEN
+conflicts: []
+depends: []
+test: "bash scripts/smoke-add-imessage-skill.sh"

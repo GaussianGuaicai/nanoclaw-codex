@@ -61,8 +61,6 @@ claude
 - **智能体集群（Agent Swarms）** - 启动多个专业智能体团队，协作完成复杂任务（首个支持此功能的个人 AI 助手）
 - **可选集成** - 通过技能添加 Gmail (`/add-gmail`) 等更多功能
 
-
-
 ## iMessage 渠道安装（技能方式）
 
 通过技能安装：
@@ -91,11 +89,13 @@ npm run build
 ```
 
 常见故障：
+
 - 启动时渠道被跳过：缺少 `IMESSAGE_ACCOUNT` 或后端凭据。
 - 主后端健康检查失败：配置 `NANOCLAW_IMESSAGE_FALLBACK_BACKEND` 及其凭据。
 - 断线重连后重复消息：确保适配器输出稳定的 `platform_message_id`；系统用 `platform_message_id + chat_id` 去重。
 
 回滚：
+
 - 回退安装该技能的提交（或使用 skills-engine 的卸载/重放流程），然后重启服务。
 
 ## 使用方法
@@ -109,6 +109,7 @@ npm run build
 ```
 
 在主频道（您的self-chat）中，可以管理群组和任务：
+
 ```
 @Andy 列出所有群组的计划任务
 @Andy 暂停周一简报任务
@@ -141,9 +142,11 @@ npm run build
 我们希望看到的技能：
 
 **通信渠道**
+
 - `/add-signal` - 添加 Signal 作为渠道
 
 **会话管理**
+
 - `/clear` - 添加一个 `/clear` 命令，用于压缩会话（在同一会话中总结上下文，同时保留关键信息）。这需要研究如何通过 Claude Agent SDK 以编程方式触发压缩。
 
 ## 系统要求
@@ -152,6 +155,8 @@ npm run build
 - Node.js 20+
 - [Claude Code](https://claude.ai/download)
 - [Apple Container](https://github.com/apple/container) (macOS) 或 [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
+
+> iMessage 桥接安全与风控说明见 [docs/IMESSAGE_SECURITY.md](docs/IMESSAGE_SECURITY.md)。
 
 ## 架构
 
@@ -164,6 +169,7 @@ npm run build
 完整架构详情请见 [docs/SPEC.md](docs/SPEC.md)。
 
 关键文件：
+
 - `src/index.ts` - 编排器：状态管理、消息循环、智能体调用
 - `src/channels/registry.ts` - 渠道注册表（启动时自注册）
 - `src/ipc.ts` - IPC 监听与任务处理
@@ -202,6 +208,7 @@ ANTHROPIC_AUTH_TOKEN=your-token-here
 ```
 
 这使您能够使用：
+
 - 通过 [Ollama](https://ollama.ai) 配合 API 代理运行的本地模型
 - 托管在 [Together AI](https://together.ai)、[Fireworks](https://fireworks.ai) 等平台上的开源模型
 - 兼容 Anthropic API 格式的自定义模型部署

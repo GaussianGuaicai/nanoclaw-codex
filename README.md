@@ -177,8 +177,6 @@ tail -f logs/nanoclaw.log  # live service log
 tail -f logs/websocket-events-home_assistant.log  # inspect HA event activity
 ```
 
-
-
 ### iMessage channel setup (skill-based)
 
 Install with:
@@ -207,11 +205,13 @@ npm run build
 ```
 
 Common issues:
+
 - Channel skipped on boot: missing `IMESSAGE_ACCOUNT` or backend credentials.
 - Primary backend unhealthy: configure `NANOCLAW_IMESSAGE_FALLBACK_BACKEND` and fallback credentials.
 - Duplicate inbound messages: ensure adapter emits stable `platform_message_id`; NanoClaw dedupes by `platform_message_id + chat_id`.
 
 Rollback:
+
 - Revert the skill commit (or use your skills-engine uninstall/replay flow) and restart NanoClaw.
 
 ## Architecture
@@ -256,6 +256,8 @@ The main security boundary is now Codex sandbox policy plus host-side directory 
 - The host still owns channel auth, sender allowlists, scheduling state, and IPC authorization.
 
 See [docs/SECURITY.md](docs/SECURITY.md) for the current model.
+
+For iMessage-specific bridge risks and hardening guidance, see [docs/IMESSAGE_SECURITY.md](docs/IMESSAGE_SECURITY.md).
 
 ## FAQ
 

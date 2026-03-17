@@ -304,6 +304,28 @@ function normalizeContent(
   return rawContent.trim();
 }
 
+function validateRiskyMode(config: IMessageBackendConfig): boolean {
+  if (!config.riskyMode.enableDirectChatDb) return true;
+
+  if (!config.riskyMode.confirmed) {
+    logger.error(
+      {
+        channel: 'imessage',
+        mode: 'direct-chatdb',
+        requiredEnv: 'NANOCLAW_IMESSAGE_I_UNDERSTAND_CHATDB_RISKS=true',
+      },
+      'Refusing to start high-risk iMessage mode without explicit confirmation',
+    );
+    return false;
+  }
+
+  logger.warn(
+    { channel: 'imessage', mode: 'direct-chatdb' },
+    'High-risk iMessage mode enabled: direct chat.db access may expose Apple ID and local message data',
+  );
+  return true;
+}
+
 function createAdapter(
   config: IMessageBackendConfig,
   backend: IMessageBackend,
@@ -329,6 +351,10 @@ registerChannel('imessage', (opts: ChannelOpts) => {
 
   if (!config.account) {
     logger.warn('iMessage: IMESSAGE_ACCOUNT not set');
+    return null;
+  }
+
+  if (!validateRiskyMode(config)) {
     return null;
   }
 

@@ -13,16 +13,36 @@ describe('imessage skill package', () => {
     expect(content).toContain('skill: imessage');
     expect(content).toContain('version: 1.0.0');
     expect(content).toContain('NANOCLAW_IMESSAGE_BACKEND');
+    expect(content).toContain('NANOCLAW_IMESSAGE_ALLOWED_HOSTS');
   });
 
   it('has required add files', () => {
-    const channelFile = path.join(skillDir, 'add', 'src', 'channels', 'imessage.ts');
+    const channelFile = path.join(
+      skillDir,
+      'add',
+      'src',
+      'channels',
+      'imessage.ts',
+    );
     expect(fs.existsSync(channelFile)).toBe(true);
 
     const channelContent = fs.readFileSync(channelFile, 'utf-8');
     expect(channelContent).toContain('class IMessageChannel');
     expect(channelContent).toContain('implements Channel');
     expect(channelContent).toContain("registerChannel('imessage'");
+
+    const configContent = fs.readFileSync(
+      path.join(
+        skillDir,
+        'add',
+        'src',
+        'channels',
+        'imessage',
+        'imessage-config.ts',
+      ),
+      'utf-8',
+    );
+    expect(configContent).toContain('readEnvFile');
 
     const adapterTypes = path.join(
       skillDir,
@@ -48,7 +68,13 @@ describe('imessage skill package', () => {
   });
 
   it('has required modify files', () => {
-    const indexFile = path.join(skillDir, 'modify', 'src', 'channels', 'index.ts');
+    const indexFile = path.join(
+      skillDir,
+      'modify',
+      'src',
+      'channels',
+      'index.ts',
+    );
     expect(fs.existsSync(indexFile)).toBe(true);
 
     const indexContent = fs.readFileSync(indexFile, 'utf-8');
@@ -71,6 +97,8 @@ describe('imessage skill package', () => {
     const content = fs.readFileSync(skillDoc, 'utf-8');
     expect(content).toContain('IMESSAGE_BACKEND_URL');
     expect(content).toContain('IMESSAGE_AUTH_TOKEN');
-    expect(content).toContain('scripts/apply-skill.ts .claude/skills/add-imessage');
+    expect(content).toContain(
+      'scripts/apply-skill.ts .claude/skills/add-imessage',
+    );
   });
 });

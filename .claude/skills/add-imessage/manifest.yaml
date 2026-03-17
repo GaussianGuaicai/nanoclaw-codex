@@ -1,6 +1,6 @@
 skill: imessage
 version: 1.0.0
-description: "iMessage channel integration with adapter architecture (BlueBubbles preferred, SMServer placeholder)"
+description: 'iMessage channel integration with adapter architecture (BlueBubbles preferred, SMServer placeholder)'
 core_version: 0.1.0
 adds:
   - src/channels/imessage.ts
@@ -21,6 +21,10 @@ structured:
     - SMSERVER_URL
     - IMESSAGE_BACKEND_URL
     - IMESSAGE_AUTH_TOKEN
+    - NANOCLAW_IMESSAGE_I_UNDERSTAND_CHATDB_RISKS
+    - NANOCLAW_IMESSAGE_ENABLE_DIRECT_CHATDB
+    - NANOCLAW_IMESSAGE_ALLOW_INSECURE_HTTP
+    - NANOCLAW_IMESSAGE_ALLOWED_HOSTS
 conflicts: []
 depends: []
-test: "bash scripts/smoke-add-imessage-skill.sh"
+test: 'bash scripts/smoke-add-imessage-skill.sh'

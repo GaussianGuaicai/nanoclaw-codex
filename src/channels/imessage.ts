@@ -1,4 +1,7 @@
-import { ASSISTANT_NAME } from '../config.js';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
+import { ASSISTANT_NAME, LOGS_DIR } from '../config.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -20,20 +23,40 @@ import {
   loadIMessageConfig,
 } from './imessage/imessage-config.js';
 
+const DEAD_LETTER_FILE = path.join(LOGS_DIR, 'imessage-dead-letter.jsonl');
+const INBOUND_DEDUPE_TTL_MS = 5 * 60_000;
+
 interface IMessageChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
 
+interface OutboundMessage {
+  jid: string;
+  chatId: string;
+  text: string;
+  queuedAt: string;
+}
+
 export class IMessageChannel implements Channel {
   name = 'imessage';
 
   private connected = false;
+  private shuttingDown = false;
   private readonly opts: IMessageChannelOpts;
   private readonly config: IMessageBackendConfig;
   private activeBackend: IMessageBackend;
   private activeAdapter: IMessageAdapter;
+
+  private reconnectAttempts = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private outboundQueue: OutboundMessage[] = [];
+  private flushingQueue = false;
+  private lastSendTimestamp = 0;
+
+  private readonly inboundSeen = new Map<string, number>();
 
   constructor(
     config: IMessageBackendConfig,
@@ -47,43 +70,60 @@ export class IMessageChannel implements Channel {
   }
 
   async connect(): Promise<void> {
-    const connected = await this.tryConnectWithFallback();
-    if (!connected) {
-      this.connected = false;
-      return;
-    }
-
-    await this.activeAdapter.subscribeInbound((event) => {
-      void this.handleInboundEvent(event);
-    });
-
-    this.connected = true;
+    this.shuttingDown = false;
     logger.info(
-      { channel: this.name, backend: this.activeBackend },
-      'iMessage channel connected',
+      { channel: this.name, state: 'connecting', backend: this.activeBackend },
+      'iMessage channel connect lifecycle start',
     );
+
+    const connected = await this.establishConnection();
+    if (connected) return;
+
+    this.scheduleReconnect('initial-connect-failed');
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
-    if (!this.connected) {
-      logger.warn({ jid }, 'iMessage channel not connected, skipping send');
+    const chatId = jid.replace(/^im:/, '');
+
+    if (this.outboundQueue.length >= this.config.send.queueMaxSize) {
+      logger.error(
+        {
+          channel: this.name,
+          queueSize: this.outboundQueue.length,
+          queueMaxSize: this.config.send.queueMaxSize,
+          jid,
+        },
+        'iMessage outbound queue is full; dropping message',
+      );
+      await this.writeDeadLetter(
+        {
+          jid,
+          chatId,
+          text,
+          queuedAt: new Date().toISOString(),
+        },
+        new Error('outbound_queue_full'),
+      );
       return;
     }
 
-    const chatId = jid.replace(/^im:/, '');
+    this.outboundQueue.push({
+      jid,
+      chatId,
+      text,
+      queuedAt: new Date().toISOString(),
+    });
 
-    try {
-      await this.activeAdapter.send(chatId, text);
-      logger.info(
-        { jid, length: text.length, backend: this.activeBackend },
-        'iMessage message sent',
-      );
-    } catch (err) {
-      logger.error(
-        { jid, err, backend: this.activeBackend },
-        'Failed to send iMessage message',
-      );
-    }
+    logger.debug(
+      {
+        channel: this.name,
+        jid,
+        queueSize: this.outboundQueue.length,
+      },
+      'Queued iMessage outbound message',
+    );
+
+    void this.flushOutboundQueue();
   }
 
   isConnected(): boolean {
@@ -95,17 +135,192 @@ export class IMessageChannel implements Channel {
   }
 
   async disconnect(): Promise<void> {
+    this.shuttingDown = true;
     this.connected = false;
-    logger.info('iMessage channel disconnected');
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    logger.info(
+      {
+        channel: this.name,
+        state: 'disconnected',
+        backend: this.activeBackend,
+      },
+      'iMessage channel disconnect lifecycle complete',
+    );
+  }
+
+  private async establishConnection(): Promise<boolean> {
+    const connected = await this.tryConnectWithFallback();
+    if (!connected) {
+      this.connected = false;
+      logger.warn(
+        {
+          channel: this.name,
+          state: 'connect_failed',
+          backend: this.activeBackend,
+        },
+        'iMessage channel failed to connect',
+      );
+      return false;
+    }
+
+    await this.activeAdapter.subscribeInbound((event) => {
+      void this.handleInboundEvent(event);
+    });
+
+    this.connected = true;
+    this.reconnectAttempts = 0;
+    logger.info(
+      { channel: this.name, state: 'connected', backend: this.activeBackend },
+      'iMessage channel connected',
+    );
+
+    void this.flushOutboundQueue();
+    return true;
+  }
+
+  private scheduleReconnect(reason: string): void {
+    if (this.shuttingDown) return;
+    if (this.reconnectTimer) return;
+
+    this.reconnectAttempts += 1;
+    const delay = Math.min(
+      this.config.reconnect.maxDelayMs,
+      this.config.reconnect.initialDelayMs *
+        2 ** Math.max(this.reconnectAttempts - 1, 0),
+    );
+
+    logger.warn(
+      {
+        channel: this.name,
+        state: 'reconnecting',
+        reason,
+        attempt: this.reconnectAttempts,
+        nextDelayMs: delay,
+      },
+      'Scheduling iMessage reconnect with exponential backoff',
+    );
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.reconnectOnce();
+    }, delay);
+  }
+
+  private async reconnectOnce(): Promise<void> {
+    if (this.shuttingDown) return;
+
+    logger.info(
+      {
+        channel: this.name,
+        state: 'reconnect_attempt',
+        attempt: this.reconnectAttempts,
+      },
+      'Attempting iMessage reconnect',
+    );
+
+    const ok = await this.establishConnection();
+    if (!ok) this.scheduleReconnect('reconnect-attempt-failed');
+  }
+
+  private async flushOutboundQueue(): Promise<void> {
+    if (this.flushingQueue) return;
+    if (!this.connected) return;
+
+    this.flushingQueue = true;
+    const minIntervalMs = Math.max(
+      1,
+      Math.ceil(1000 / Math.max(this.config.send.rateLimitPerSecond, 1)),
+    );
+
+    try {
+      while (this.outboundQueue.length > 0) {
+        if (!this.connected) break;
+
+        const msg = this.outboundQueue.shift()!;
+
+        const waitMs = this.lastSendTimestamp + minIntervalMs - Date.now();
+        if (waitMs > 0) await sleep(waitMs);
+
+        try {
+          await this.activeAdapter.send(msg.chatId, msg.text);
+          this.lastSendTimestamp = Date.now();
+          logger.info(
+            {
+              channel: this.name,
+              jid: msg.jid,
+              length: msg.text.length,
+              backend: this.activeBackend,
+              queueRemaining: this.outboundQueue.length,
+            },
+            'iMessage message sent',
+          );
+        } catch (err) {
+          this.connected = false;
+          await this.writeDeadLetter(msg, err);
+          logger.error(
+            {
+              channel: this.name,
+              jid: msg.jid,
+              err,
+              backend: this.activeBackend,
+            },
+            'Failed to send iMessage message; stored in dead-letter and scheduling reconnect',
+          );
+          this.scheduleReconnect('send-failed');
+          break;
+        }
+      }
+    } finally {
+      this.flushingQueue = false;
+    }
+  }
+
+  private async writeDeadLetter(
+    msg: OutboundMessage,
+    err: unknown,
+  ): Promise<void> {
+    const line = JSON.stringify({
+      timestamp: new Date().toISOString(),
+      channel: this.name,
+      backend: this.activeBackend,
+      jid: msg.jid,
+      chatId: msg.chatId,
+      text: msg.text,
+      queuedAt: msg.queuedAt,
+      error: err instanceof Error ? err.message : String(err),
+    });
+
+    await fs.mkdir(path.dirname(DEAD_LETTER_FILE), { recursive: true });
+    await fs.appendFile(DEAD_LETTER_FILE, `${line}\n`, 'utf8');
   }
 
   private async handleInboundEvent(event: IMessageInboundEvent): Promise<void> {
     const jid = `im:${event.chatId}`;
+    const dedupeId = `${event.platformMessageId}:${event.chatId}`;
+
+    this.pruneInboundDedupeCache();
+    if (this.inboundSeen.has(dedupeId)) {
+      logger.debug(
+        {
+          channel: this.name,
+          dedupeId,
+          backend: this.activeBackend,
+        },
+        'Skipping duplicated iMessage inbound event (memory cache)',
+      );
+      return;
+    }
+    this.inboundSeen.set(dedupeId, Date.now());
+
     const timestamp = event.timestamp;
     const chatMeta = await this.activeAdapter.resolveChatMeta(event.chatId);
     const isGroup = chatMeta?.isGroup ?? true;
 
-    // Always store metadata for chat discovery and routing.
     this.opts.onChatMetadata(
       jid,
       timestamp,
@@ -153,6 +368,13 @@ export class IMessageChannel implements Channel {
     this.opts.onMessage(jid, normalized);
   }
 
+  private pruneInboundDedupeCache(): void {
+    const cutoff = Date.now() - INBOUND_DEDUPE_TTL_MS;
+    for (const [key, value] of this.inboundSeen.entries()) {
+      if (value < cutoff) this.inboundSeen.delete(key);
+    }
+  }
+
   private normalizeInboundEvent(
     event: IMessageInboundEvent,
     jid: string,
@@ -170,7 +392,6 @@ export class IMessageChannel implements Channel {
       event.attachmentName,
     );
 
-    // Dedupe key: platform_message_id + chat_id
     const dedupeId = `${event.platformMessageId}:${event.chatId}`;
 
     return {
@@ -268,6 +489,10 @@ export class IMessageChannel implements Channel {
       return false;
     }
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function normalizeContent(

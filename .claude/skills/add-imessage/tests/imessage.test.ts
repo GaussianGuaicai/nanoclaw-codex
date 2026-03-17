@@ -14,6 +14,7 @@ describe('imessage skill package', () => {
     expect(content).toContain('version: 1.0.0');
     expect(content).toContain('NANOCLAW_IMESSAGE_BACKEND');
     expect(content).toContain('NANOCLAW_IMESSAGE_ALLOWED_HOSTS');
+    expect(content).toContain('NANOCLAW_IMESSAGE_RECONNECT_INITIAL_DELAY_MS');
   });
 
   it('has required add files', () => {
@@ -65,6 +66,14 @@ describe('imessage skill package', () => {
       'bluebubbles-adapter.ts',
     );
     expect(fs.existsSync(bluebubbles)).toBe(true);
+
+    const replayScript = path.join(
+      skillDir,
+      'add',
+      'scripts',
+      'replay-imessage-dead-letter.mjs',
+    );
+    expect(fs.existsSync(replayScript)).toBe(true);
   });
 
   it('has required modify files', () => {

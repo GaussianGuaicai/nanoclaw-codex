@@ -8,6 +8,7 @@ adds:
   - src/channels/imessage/adapters/types.ts
   - src/channels/imessage/adapters/bluebubbles-adapter.ts
   - src/channels/imessage/adapters/smserver-adapter.ts
+  - scripts/replay-imessage-dead-letter.mjs
 modifies:
   - src/channels/index.ts
 structured:
@@ -25,6 +26,10 @@ structured:
     - NANOCLAW_IMESSAGE_ENABLE_DIRECT_CHATDB
     - NANOCLAW_IMESSAGE_ALLOW_INSECURE_HTTP
     - NANOCLAW_IMESSAGE_ALLOWED_HOSTS
+    - NANOCLAW_IMESSAGE_SEND_QUEUE_MAX_SIZE
+    - NANOCLAW_IMESSAGE_SEND_RATE_LIMIT_PER_SECOND
+    - NANOCLAW_IMESSAGE_RECONNECT_MAX_DELAY_MS
+    - NANOCLAW_IMESSAGE_RECONNECT_INITIAL_DELAY_MS
 conflicts: []
 depends: []
 test: 'bash scripts/smoke-add-imessage-skill.sh'

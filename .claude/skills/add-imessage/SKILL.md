@@ -29,6 +29,9 @@ Security hardening (recommended):
 - `NANOCLAW_IMESSAGE_ALLOW_INSECURE_HTTP` - Default `false`; only relax for controlled environments
 - `NANOCLAW_IMESSAGE_ENABLE_DIRECT_CHATDB` - High-risk mode switch
 - `NANOCLAW_IMESSAGE_I_UNDERSTAND_CHATDB_RISKS` - Must be `true` to confirm high-risk mode
+- `NANOCLAW_IMESSAGE_RECONNECT_INITIAL_DELAY_MS` / `NANOCLAW_IMESSAGE_RECONNECT_MAX_DELAY_MS` - Exponential backoff reconnect window
+- `NANOCLAW_IMESSAGE_SEND_RATE_LIMIT_PER_SECOND` - Outbound send rate cap
+- `NANOCLAW_IMESSAGE_SEND_QUEUE_MAX_SIZE` - Outbound queue cap before dead-letter
 
 Compatibility aliases often requested by users:
 
@@ -83,6 +86,15 @@ bash scripts/smoke-add-imessage-skill.sh
 - Use `.env` + `readEnvFile` pattern for credentials; avoid exporting bridge tokens broadly in shell profiles.
 - External bridge URLs should be `https` and allowlisted.
 - Direct `chat.db` access is high risk and requires explicit confirmation env vars.
+
+## Dead-letter replay
+
+Failed outbound messages are written to `logs/imessage-dead-letter.jsonl`.
+
+```bash
+node scripts/replay-imessage-dead-letter.mjs           # dry run
+node scripts/replay-imessage-dead-letter.mjs --execute # replay (BlueBubbles)
+```
 
 ## Troubleshooting
 

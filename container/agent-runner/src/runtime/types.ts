@@ -11,11 +11,14 @@ export interface AgentExecutionConfig {
   codexConfigOverrides?: Record<string, unknown>;
 }
 
+export type AgentTaskSource = 'chat' | 'scheduled' | 'websocket';
+
 export interface ContainerInput {
   prompt: string;
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
+  taskSource?: AgentTaskSource;
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;

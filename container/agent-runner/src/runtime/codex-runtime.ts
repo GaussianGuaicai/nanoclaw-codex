@@ -284,6 +284,7 @@ function archiveCodexTurn(
   response: string,
   groupPath: string,
   threadId?: string,
+  taskSource?: string,
 ): void {
   const conversationsDir = path.join(groupPath, 'conversations');
   fs.mkdirSync(conversationsDir, { recursive: true });
@@ -294,18 +295,28 @@ function archiveCodexTurn(
   const filePath = path.join(conversationsDir, filename);
 
   const now = new Date().toISOString();
-  const content = [
-    `# Codex turn archive (${now})`,
-    '',
-    '## User',
-    '',
-    prompt,
-    '',
-    '## Assistant',
-    '',
-    response || '(empty)',
-    '',
-  ].join('\n');
+  const content =
+    taskSource === 'websocket'
+      ? [
+          `# Codex turn archive (${now})`,
+          '',
+          '## WebSocket task',
+          '',
+          '(details omitted)',
+          '',
+        ].join('\n')
+      : [
+          `# Codex turn archive (${now})`,
+          '',
+          '## User',
+          '',
+          prompt,
+          '',
+          '## Assistant',
+          '',
+          response || '(empty)',
+          '',
+        ].join('\n');
 
   fs.appendFileSync(filePath, content);
 }
@@ -455,7 +466,13 @@ export class CodexRuntime implements AgentRuntime {
       };
     }
 
-    archiveCodexTurn(prompt, finalText, runtimePaths.groupPath, newSessionId);
+    archiveCodexTurn(
+      prompt,
+      finalText,
+      runtimePaths.groupPath,
+      newSessionId,
+      containerInput.taskSource,
+    );
     this.hooks.onResult(finalText || null, newSessionId || undefined);
 
     return {

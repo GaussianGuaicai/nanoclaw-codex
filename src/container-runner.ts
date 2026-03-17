@@ -45,6 +45,7 @@ export interface ContainerInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
+  taskSource?: 'chat' | 'scheduled' | 'websocket';
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;

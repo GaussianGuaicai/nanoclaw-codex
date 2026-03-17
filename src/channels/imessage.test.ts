@@ -54,8 +54,13 @@ class FakeAdapter implements IMessageAdapter {
   }
 }
 
-function createConfig(): IMessageBackendConfig {
+function createConfig(
+  overrides: Partial<IMessageBackendConfig> = {},
+): IMessageBackendConfig {
   return {
+    enabled: true,
+    rolloutStage: 3,
+    allowedChatIds: [],
     backend: 'bluebubbles',
     fallbackBackend: null,
     account: 'me@example.com',
@@ -66,6 +71,7 @@ function createConfig(): IMessageBackendConfig {
     blueBubbles: { url: 'http://localhost:1234', password: 'secret' },
     smserver: { url: '' },
     riskyMode: { enableDirectChatDb: false, confirmed: false },
+    ...overrides,
   };
 }
 
@@ -93,6 +99,7 @@ describe('iMessage registration', () => {
 
   it('registers channel factory and creates channel when credentials exist', async () => {
     readEnvFileMock.mockReturnValue({
+      NANOCLAW_IMESSAGE_ENABLED: 'true',
       IMESSAGE_ACCOUNT: 'me@example.com',
       NANOCLAW_IMESSAGE_BACKEND: 'bluebubbles',
       BLUEBUBBLES_URL: 'http://localhost:1234',
@@ -109,6 +116,7 @@ describe('iMessage registration', () => {
 
   it('factory returns null when IMESSAGE_ACCOUNT missing', async () => {
     readEnvFileMock.mockReturnValue({
+      NANOCLAW_IMESSAGE_ENABLED: 'true',
       NANOCLAW_IMESSAGE_BACKEND: 'bluebubbles',
       BLUEBUBBLES_URL: 'http://localhost:1234',
       BLUEBUBBLES_PASSWORD: 'secret',
@@ -132,6 +140,32 @@ describe('IMessageChannel behavior', () => {
 
     expect(channel.ownsJid('im:iMessage;+;chat123')).toBe(true);
     expect(channel.ownsJid('slack:C123')).toBe(false);
+  });
+
+  it('stage 0 stores metadata only and does not deliver onMessage', async () => {
+    const { IMessageChannel } = await import('./imessage.js');
+    const adapter = new FakeAdapter();
+    const opts = createOpts();
+    const channel = new IMessageChannel(
+      createConfig({ rolloutStage: 0 }),
+      opts,
+      adapter,
+    );
+
+    await channel.connect();
+    adapter.inboundHandler?.({
+      platformMessageId: 'stage0-1',
+      chatId: 'iMessage;+;chat123',
+      sender: '+15550001111',
+      timestamp: new Date().toISOString(),
+      type: 'message',
+      messageType: 'text',
+      content: 'metadata-only',
+    });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(opts.onChatMetadata).toHaveBeenCalledTimes(1);
+    expect(opts.onMessage).toHaveBeenCalledTimes(0);
   });
 
   it('normalizes non-text message to placeholder', async () => {

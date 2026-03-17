@@ -335,21 +335,28 @@ export class IMessageChannel implements Channel {
       eventType === 'edit' ||
       eventType === 'retract'
     ) {
-      logger.debug(
-        {
-          channel: this.name,
-          eventType,
-          backend: this.activeBackend,
-          chatId: event.chatId,
-          platformMessageId: event.platformMessageId,
-        },
-        'Received iMessage non-message event',
-      );
+      if (this.shouldEmitAdvancedEventLogs()) {
+        logger.debug(
+          {
+            channel: this.name,
+            eventType,
+            backend: this.activeBackend,
+            chatId: event.chatId,
+            platformMessageId: event.platformMessageId,
+            rolloutStage: this.config.rolloutStage,
+          },
+          'Received iMessage non-message event',
+        );
+      }
       return;
     }
 
     const groups = this.opts.registeredGroups();
     if (!groups[jid]) return;
+
+    if (!this.shouldProcessInboundForStage(event, jid, isGroup)) {
+      return;
+    }
 
     const normalized = this.normalizeInboundEvent(event, jid);
     if (!normalized.content) {
@@ -386,11 +393,14 @@ export class IMessageChannel implements Channel {
         : event.sender === this.config.account;
 
     const messageType = event.messageType || 'text';
-    const content = normalizeContent(
-      event.content || '',
-      messageType,
-      event.attachmentName,
-    );
+    const content =
+      this.config.rolloutStage >= 3
+        ? normalizeContent(
+            event.content || '',
+            messageType,
+            event.attachmentName,
+          )
+        : (event.content || '').trim();
 
     const dedupeId = `${event.platformMessageId}:${event.chatId}`;
 
@@ -404,6 +414,50 @@ export class IMessageChannel implements Channel {
       is_from_me: isFromMe,
       is_bot_message: isFromMe || senderName === ASSISTANT_NAME,
     };
+  }
+
+  private shouldProcessInboundForStage(
+    event: IMessageInboundEvent,
+    jid: string,
+    isGroup: boolean,
+  ): boolean {
+    const stage = this.config.rolloutStage;
+
+    // Stage 0: metadata-only discovery, never feed agent context.
+    if (stage === 0) {
+      logger.debug(
+        { channel: this.name, rolloutStage: stage, jid },
+        'Stage 0 active: skipping iMessage inbound content delivery',
+      );
+      return false;
+    }
+
+    const allowedChat =
+      this.config.allowedChatIds.length === 0 ||
+      this.config.allowedChatIds.includes(event.chatId) ||
+      this.config.allowedChatIds.includes(jid);
+
+    // Stage 1: DM text-only for allowlisted chats.
+    if (stage === 1) {
+      if (isGroup) return false;
+      if (!allowedChat) return false;
+      if ((event.messageType || 'text') !== 'text') return false;
+      return true;
+    }
+
+    // Stage 2: groups enabled, keep text-only to reduce accidental noise.
+    if (stage === 2) {
+      if (!allowedChat) return false;
+      if ((event.messageType || 'text') !== 'text') return false;
+      return true;
+    }
+
+    // Stage 3+: full placeholders + advanced event logs + group traffic.
+    return allowedChat;
+  }
+
+  private shouldEmitAdvancedEventLogs(): boolean {
+    return this.config.rolloutStage >= 3;
   }
 
   private async tryConnectWithFallback(): Promise<boolean> {
@@ -573,6 +627,11 @@ function createAdapter(
 
 registerChannel('imessage', (opts: ChannelOpts) => {
   const config = loadIMessageConfig();
+
+  if (!config.enabled) {
+    logger.warn('iMessage: disabled by NANOCLAW_IMESSAGE_ENABLED=false');
+    return null;
+  }
 
   if (!config.account) {
     logger.warn('iMessage: IMESSAGE_ACCOUNT not set');

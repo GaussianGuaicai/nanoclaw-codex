@@ -1,8 +1,12 @@
 import { readEnvFile } from '../../env.js';
 
 export type IMessageBackend = 'bluebubbles' | 'smserver';
+export type IMessageRolloutStage = 0 | 1 | 2 | 3;
 
 export interface IMessageBackendConfig {
+  enabled: boolean;
+  rolloutStage: IMessageRolloutStage;
+  allowedChatIds: string[];
   backend: IMessageBackend;
   fallbackBackend: IMessageBackend | null;
   account: string;
@@ -31,6 +35,9 @@ export interface IMessageBackendConfig {
 
 export function loadIMessageConfig(): IMessageBackendConfig {
   const env = readEnvFile([
+    'NANOCLAW_IMESSAGE_ENABLED',
+    'NANOCLAW_IMESSAGE_ROLLOUT_STAGE',
+    'NANOCLAW_IMESSAGE_ALLOWED_CHAT_IDS',
     'IMESSAGE_ACCOUNT',
     'NANOCLAW_IMESSAGE_BACKEND',
     'NANOCLAW_IMESSAGE_FALLBACK_BACKEND',
@@ -53,12 +60,15 @@ export function loadIMessageConfig(): IMessageBackendConfig {
     null,
   );
 
-  const allowedHosts = parseAllowedHosts(env.NANOCLAW_IMESSAGE_ALLOWED_HOSTS);
+  const allowedHosts = parseCsv(env.NANOCLAW_IMESSAGE_ALLOWED_HOSTS);
   const allowInsecureHttp = parseBool(
     env.NANOCLAW_IMESSAGE_ALLOW_INSECURE_HTTP,
   );
 
   return {
+    enabled: env.NANOCLAW_IMESSAGE_ENABLED !== 'false',
+    rolloutStage: parseRolloutStage(env.NANOCLAW_IMESSAGE_ROLLOUT_STAGE),
+    allowedChatIds: parseCsv(env.NANOCLAW_IMESSAGE_ALLOWED_CHAT_IDS),
     backend: backend || 'bluebubbles',
     fallbackBackend:
       fallbackBackend && fallbackBackend !== backend ? fallbackBackend : null,
@@ -120,12 +130,19 @@ function parseBool(value: string | undefined): boolean {
   return value === 'true';
 }
 
-function parseAllowedHosts(value: string | undefined): string[] {
+function parseCsv(value: string | undefined): string[] {
   if (!value) return [];
   return value
     .split(',')
-    .map((item) => item.trim().toLowerCase())
+    .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function parseRolloutStage(value: string | undefined): IMessageRolloutStage {
+  if (value === '1') return 1;
+  if (value === '2') return 2;
+  if (value === '3') return 3;
+  return 0;
 }
 
 function parseIntOrDefault(

@@ -30,6 +30,9 @@ Security hardening (recommended):
 - `NANOCLAW_IMESSAGE_ENABLE_DIRECT_CHATDB` - High-risk mode switch
 - `NANOCLAW_IMESSAGE_I_UNDERSTAND_CHATDB_RISKS` - Must be `true` to confirm high-risk mode
 - `NANOCLAW_IMESSAGE_RECONNECT_INITIAL_DELAY_MS` / `NANOCLAW_IMESSAGE_RECONNECT_MAX_DELAY_MS` - Exponential backoff reconnect window
+- `NANOCLAW_IMESSAGE_ENABLED` - Global rollback switch (`false` disables channel startup)
+- `NANOCLAW_IMESSAGE_ROLLOUT_STAGE` - 0..3 phased rollout mode
+- `NANOCLAW_IMESSAGE_ALLOWED_CHAT_IDS` - Comma-separated allowlist for staged rollout
 - `NANOCLAW_IMESSAGE_SEND_RATE_LIMIT_PER_SECOND` - Outbound send rate cap
 - `NANOCLAW_IMESSAGE_SEND_QUEUE_MAX_SIZE` - Outbound queue cap before dead-letter
 
@@ -86,6 +89,23 @@ bash scripts/smoke-add-imessage-skill.sh
 - Use `.env` + `readEnvFile` pattern for credentials; avoid exporting bridge tokens broadly in shell profiles.
 - External bridge URLs should be `https` and allowlisted.
 - Direct `chat.db` access is high risk and requires explicit confirmation env vars.
+
+## Phased rollout
+
+- Stage 0 (`NANOCLAW_IMESSAGE_ROLLOUT_STAGE=0`): inbound metadata only (chat discovery + dedupe), no agent delivery.
+- Stage 1 (`...=1`): allowlisted DM text only.
+- Stage 2 (`...=2`): groups + trigger path enabled (text only).
+- Stage 3 (`...=3`): attachment placeholders + advanced event logs (edit/retract/receipt).
+
+## Rollback
+
+Fast rollback without code revert:
+
+```bash
+NANOCLAW_IMESSAGE_ENABLED=false
+```
+
+This disables channel startup while preserving stored chat/message history in SQLite.
 
 ## Dead-letter replay
 

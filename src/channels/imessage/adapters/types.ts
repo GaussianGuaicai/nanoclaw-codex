@@ -1,10 +1,31 @@
+export type IMessageInboundEventType =
+  | 'message'
+  | 'receipt'
+  | 'edit'
+  | 'retract';
+
+export type IMessageInboundMessageType =
+  | 'text'
+  | 'image'
+  | 'video'
+  | 'voice'
+  | 'audio'
+  | 'attachment'
+  | 'sticker'
+  | 'location'
+  | 'contact'
+  | 'system';
+
 export interface IMessageInboundEvent {
-  id: string;
+  platformMessageId: string;
   chatId: string;
   sender: string;
   senderName?: string;
-  content: string;
   timestamp: string;
+  type?: IMessageInboundEventType;
+  messageType?: IMessageInboundMessageType;
+  content?: string;
+  attachmentName?: string;
   isFromMe?: boolean;
 }
 

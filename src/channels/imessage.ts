@@ -5,6 +5,7 @@ import {
   OnChatMetadata,
   OnInboundMessage,
   RegisteredGroup,
+  NewMessage,
 } from '../types.js';
 import { ChannelOpts, registerChannel } from './registry.js';
 import { BlueBubblesAdapter } from './imessage/adapters/bluebubbles-adapter.js';
@@ -104,6 +105,7 @@ export class IMessageChannel implements Channel {
     const chatMeta = await this.activeAdapter.resolveChatMeta(event.chatId);
     const isGroup = chatMeta?.isGroup ?? true;
 
+    // Always store metadata for chat discovery and routing.
     this.opts.onChatMetadata(
       jid,
       timestamp,
@@ -112,25 +114,75 @@ export class IMessageChannel implements Channel {
       isGroup,
     );
 
+    const eventType = event.type || 'message';
+    if (
+      eventType === 'receipt' ||
+      eventType === 'edit' ||
+      eventType === 'retract'
+    ) {
+      logger.debug(
+        {
+          channel: this.name,
+          eventType,
+          backend: this.activeBackend,
+          chatId: event.chatId,
+          platformMessageId: event.platformMessageId,
+        },
+        'Received iMessage non-message event',
+      );
+      return;
+    }
+
     const groups = this.opts.registeredGroups();
     if (!groups[jid]) return;
 
+    const normalized = this.normalizeInboundEvent(event, jid);
+    if (!normalized.content) {
+      logger.debug(
+        {
+          channel: this.name,
+          backend: this.activeBackend,
+          chatId: event.chatId,
+          platformMessageId: event.platformMessageId,
+        },
+        'Skipping iMessage inbound event with empty normalized content',
+      );
+      return;
+    }
+
+    this.opts.onMessage(jid, normalized);
+  }
+
+  private normalizeInboundEvent(
+    event: IMessageInboundEvent,
+    jid: string,
+  ): NewMessage {
     const senderName = event.senderName || event.sender || 'unknown';
     const isFromMe =
       event.isFromMe !== undefined
         ? event.isFromMe
         : event.sender === this.config.account;
 
-    this.opts.onMessage(jid, {
-      id: event.id,
+    const messageType = event.messageType || 'text';
+    const content = normalizeContent(
+      event.content || '',
+      messageType,
+      event.attachmentName,
+    );
+
+    // Dedupe key: platform_message_id + chat_id
+    const dedupeId = `${event.platformMessageId}:${event.chatId}`;
+
+    return {
+      id: dedupeId,
       chat_jid: jid,
       sender: event.sender,
       sender_name: senderName,
-      content: event.content,
-      timestamp,
+      content,
+      timestamp: event.timestamp,
       is_from_me: isFromMe,
       is_bot_message: isFromMe || senderName === ASSISTANT_NAME,
-    });
+    };
   }
 
   private async tryConnectWithFallback(): Promise<boolean> {
@@ -216,6 +268,40 @@ export class IMessageChannel implements Channel {
       return false;
     }
   }
+}
+
+function normalizeContent(
+  rawContent: string,
+  messageType:
+    | 'text'
+    | 'image'
+    | 'video'
+    | 'voice'
+    | 'audio'
+    | 'attachment'
+    | 'sticker'
+    | 'location'
+    | 'contact'
+    | 'system',
+  attachmentName?: string,
+): string {
+  if (messageType === 'text' || messageType === 'system') {
+    return rawContent.trim();
+  }
+
+  if (messageType === 'image') return '[Image]';
+  if (messageType === 'video') return '[Video]';
+  if (messageType === 'voice') return '[Voice]';
+  if (messageType === 'audio') return '[Audio]';
+  if (messageType === 'sticker') return '[Sticker]';
+  if (messageType === 'location') return '[Location]';
+  if (messageType === 'contact') return '[Contact]';
+  if (messageType === 'attachment') {
+    const name = attachmentName?.trim() || 'file';
+    return `[Attachment: ${name}]`;
+  }
+
+  return rawContent.trim();
 }
 
 function createAdapter(

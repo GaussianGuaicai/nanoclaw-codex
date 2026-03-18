@@ -16,6 +16,14 @@ import {
   RuntimeIpc,
 } from './types.js';
 
+type CodexConfigObject = NonNullable<CodexOptions['config']>;
+type CodexJsonValue =
+  | string
+  | number
+  | boolean
+  | CodexJsonValue[]
+  | CodexConfigObject;
+
 function parseBool(value: string | undefined, defaultValue: boolean): boolean {
   if (value == null) return defaultValue;
   const normalized = value.trim().toLowerCase();
@@ -33,17 +41,20 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 function deepMergeConfig(
-  lowerPriority: Record<string, unknown>,
-  higherPriority: Record<string, unknown>,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = { ...lowerPriority };
+  lowerPriority: CodexConfigObject,
+  higherPriority: CodexConfigObject,
+): CodexConfigObject {
+  const result: CodexConfigObject = { ...lowerPriority };
   for (const [key, value] of Object.entries(higherPriority)) {
     const existing = result[key];
     if (isPlainObject(existing) && isPlainObject(value)) {
-      result[key] = deepMergeConfig(existing, value);
+      result[key] = deepMergeConfig(
+        existing as CodexConfigObject,
+        value as CodexConfigObject,
+      );
       continue;
     }
-    result[key] = value;
+    result[key] = value as CodexJsonValue;
   }
   return result;
 }
@@ -227,7 +238,7 @@ export function getCodexOptions(input: RunQueryInput): CodexOptions {
     ...remoteMcpServers,
   };
 
-  const baseConfig: Record<string, unknown> = {
+  const baseConfig: CodexConfigObject = {
     mcp_servers: mcpServers,
     sandbox_workspace_write: {
       writable_roots: runtimePaths.writableRoots,
@@ -246,8 +257,10 @@ export function getCodexOptions(input: RunQueryInput): CodexOptions {
         }
       : {}),
   };
-  const userConfig = isPlainObject(containerInput.agentConfig?.codexConfigOverrides)
-    ? containerInput.agentConfig?.codexConfigOverrides
+  const userConfig = isPlainObject(
+    containerInput.agentConfig?.codexConfigOverrides,
+  )
+    ? (containerInput.agentConfig.codexConfigOverrides as CodexConfigObject)
     : {};
 
   return {

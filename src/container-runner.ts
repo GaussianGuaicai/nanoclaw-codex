@@ -328,10 +328,18 @@ function dedupePaths(paths: string[]): string[] {
 function findInstructionFiles(rootPath: string): string[] {
   const filenames = ['AGENTS.md', 'CLAUDE.md', 'preferences.md'];
   const nestedRoot = path.join(rootPath, 'groups', path.basename(rootPath));
-  const candidates = [
-    ...filenames.map((filename) => path.join(rootPath, filename)),
-    ...filenames.map((filename) => path.join(nestedRoot, filename)),
-  ];
+  const rootCandidates = filenames.map((filename) => path.join(rootPath, filename));
+  const legacyCandidates = filenames
+    .map((filename) => {
+      const rootCandidate = path.join(rootPath, filename);
+      const legacyCandidate = path.join(nestedRoot, filename);
+      if (fs.existsSync(rootCandidate)) {
+        return null;
+      }
+      return legacyCandidate;
+    })
+    .filter((candidate): candidate is string => candidate !== null);
+  const candidates = [...rootCandidates, ...legacyCandidates];
 
   const files: string[] = [];
   for (const candidate of candidates) {

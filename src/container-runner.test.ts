@@ -230,6 +230,22 @@ describe('container-runner worker execution', () => {
     );
   });
 
+  it('prefers standard group instruction paths over legacy nested paths', () => {
+    mockExistingPaths([
+      '/tmp/nanoclaw-test-groups/test-group/preferences.md',
+      '/tmp/nanoclaw-test-groups/test-group/groups/test-group/preferences.md',
+    ]);
+
+    const layout = buildAgentExecutionLayout(testGroup, false);
+
+    expect(layout.sharedInstructionFiles).toContain(
+      '/tmp/nanoclaw-test-groups/test-group/preferences.md',
+    );
+    expect(layout.sharedInstructionFiles).not.toContain(
+      '/tmp/nanoclaw-test-groups/test-group/groups/test-group/preferences.md',
+    );
+  });
+
   it('timeout after output resolves as success', async () => {
     const onOutput = vi.fn(async () => {});
     const resultPromise = runContainerAgent(

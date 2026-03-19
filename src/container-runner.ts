@@ -328,7 +328,9 @@ function dedupePaths(paths: string[]): string[] {
 function findInstructionFiles(rootPath: string): string[] {
   const filenames = ['AGENTS.md', 'CLAUDE.md', 'preferences.md'];
   const nestedRoot = path.join(rootPath, 'groups', path.basename(rootPath));
-  const rootCandidates = filenames.map((filename) => path.join(rootPath, filename));
+  const rootCandidates = filenames.map((filename) =>
+    path.join(rootPath, filename),
+  );
   const legacyCandidates = filenames
     .map((filename) => {
       const rootCandidate = path.join(rootPath, filename);

@@ -121,6 +121,8 @@ function mockExistingPaths(paths: string[]): void {
   const resolved = new Set(paths);
   fsMock.existsSync.mockImplementation(((inputPath: unknown) =>
     resolved.has(String(inputPath))) as any);
+  fsMock.readFileSync.mockImplementation(((inputPath: unknown) =>
+    resolved.has(String(inputPath)) ? 'instruction content' : '') as any);
 }
 
 describe('container-runner worker execution', () => {
@@ -153,6 +155,7 @@ describe('container-runner worker execution', () => {
     ] as any);
     mockExistingPaths([
       '/tmp/nanoclaw-test-groups/global',
+      '/tmp/nanoclaw-test-groups/test-group/groups/test-group/preferences.md',
       '/tmp/nanoclaw-test-data/sessions/test-group/sandbox-context/global/AGENTS.md',
       '/tmp/nanoclaw-test-data/sessions/test-group/sandbox-context/extra/docs/AGENTS.md',
       '/allowed/repo/AGENTS.md',
@@ -183,6 +186,7 @@ describe('container-runner worker execution', () => {
     );
     expect(layout.sharedInstructionFiles).toEqual(
       expect.arrayContaining([
+        '/tmp/nanoclaw-test-groups/test-group/groups/test-group/preferences.md',
         '/tmp/nanoclaw-test-data/sessions/test-group/sandbox-context/global/AGENTS.md',
         '/tmp/nanoclaw-test-data/sessions/test-group/sandbox-context/extra/docs/AGENTS.md',
         '/allowed/repo/AGENTS.md',

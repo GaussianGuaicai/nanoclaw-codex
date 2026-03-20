@@ -102,7 +102,10 @@ function applySourceLayer(
   layer?: AgentExecutionSourceConfig | null,
 ): AgentExecutionConfig {
   if (!layer) return current;
-  return mergeConfig(mergeConfig(current, layer.defaults), layer.bySource?.[source]);
+  return mergeConfig(
+    mergeConfig(current, layer.defaults),
+    layer.bySource?.[source],
+  );
 }
 
 function readLegacyDefaults(): AgentExecutionConfig {
@@ -110,7 +113,8 @@ function readLegacyDefaults(): AgentExecutionConfig {
     'NANOCLAW_CODEX_MODEL',
     'NANOCLAW_CODEX_REASONING_EFFORT',
   ]);
-  const model = process.env.NANOCLAW_CODEX_MODEL || envFile.NANOCLAW_CODEX_MODEL;
+  const model =
+    process.env.NANOCLAW_CODEX_MODEL || envFile.NANOCLAW_CODEX_MODEL;
   const reasoningRaw =
     process.env.NANOCLAW_CODEX_REASONING_EFFORT ||
     envFile.NANOCLAW_CODEX_REASONING_EFFORT;
@@ -174,7 +178,9 @@ function parseScoped<T>(
   schema: z.ZodType<T>,
   value: unknown,
   scope: AgentExecutionConfigScope,
-): { ok: true; value?: T } | { ok: false; scope: AgentExecutionConfigScope; error: string } {
+):
+  | { ok: true; value?: T }
+  | { ok: false; scope: AgentExecutionConfigScope; error: string } {
   if (value === undefined || value === null) return { ok: true };
   const parsed = schema.safeParse(value);
   if (parsed.success) return { ok: true, value: parsed.data };

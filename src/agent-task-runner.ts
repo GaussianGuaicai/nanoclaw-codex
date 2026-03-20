@@ -135,6 +135,7 @@ export async function runSingleTurnAgentTask(
         sessionId,
         groupFolder: group.folder,
         chatJid: request.chatJid,
+        taskSource: request.source,
         isMain,
         agentConfig: resolvedAgentConfig.config,
         isScheduledTask: request.isScheduledTask,

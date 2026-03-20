@@ -121,6 +121,8 @@ function mockExistingPaths(paths: string[]): void {
   const resolved = new Set(paths);
   fsMock.existsSync.mockImplementation(((inputPath: unknown) =>
     resolved.has(String(inputPath))) as any);
+  fsMock.readFileSync.mockImplementation(((inputPath: unknown) =>
+    resolved.has(String(inputPath)) ? 'instruction content' : '') as any);
 }
 
 describe('container-runner worker execution', () => {
@@ -153,6 +155,7 @@ describe('container-runner worker execution', () => {
     ] as any);
     mockExistingPaths([
       '/tmp/nanoclaw-test-groups/global',
+      '/tmp/nanoclaw-test-groups/test-group/groups/test-group/preferences.md',
       '/tmp/nanoclaw-test-data/sessions/test-group/sandbox-context/global/AGENTS.md',
       '/tmp/nanoclaw-test-data/sessions/test-group/sandbox-context/extra/docs/AGENTS.md',
       '/allowed/repo/AGENTS.md',
@@ -183,6 +186,7 @@ describe('container-runner worker execution', () => {
     );
     expect(layout.sharedInstructionFiles).toEqual(
       expect.arrayContaining([
+        '/tmp/nanoclaw-test-groups/test-group/groups/test-group/preferences.md',
         '/tmp/nanoclaw-test-data/sessions/test-group/sandbox-context/global/AGENTS.md',
         '/tmp/nanoclaw-test-data/sessions/test-group/sandbox-context/extra/docs/AGENTS.md',
         '/allowed/repo/AGENTS.md',
@@ -223,6 +227,22 @@ describe('container-runner worker execution', () => {
       '/tmp/nanoclaw-test-groups/global',
       '/tmp/nanoclaw-test-data/sessions/test-group/sandbox-context/global',
       { recursive: true },
+    );
+  });
+
+  it('prefers standard group instruction paths over legacy nested paths', () => {
+    mockExistingPaths([
+      '/tmp/nanoclaw-test-groups/test-group/preferences.md',
+      '/tmp/nanoclaw-test-groups/test-group/groups/test-group/preferences.md',
+    ]);
+
+    const layout = buildAgentExecutionLayout(testGroup, false);
+
+    expect(layout.sharedInstructionFiles).toContain(
+      '/tmp/nanoclaw-test-groups/test-group/preferences.md',
+    );
+    expect(layout.sharedInstructionFiles).not.toContain(
+      '/tmp/nanoclaw-test-groups/test-group/groups/test-group/preferences.md',
     );
   });
 
@@ -297,6 +317,48 @@ describe('container-runner worker execution', () => {
     expect(logWrite?.[1]).toContain('WebSocket-triggered prompt body');
     expect(logWrite?.[1]).toContain('=== Result ===');
     expect(logWrite?.[1]).toContain('No user-facing action needed.');
+  });
+
+  it('includes worker stderr trace in successful worker logs', async () => {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        prompt: 'Trace prompt',
+      },
+      () => {},
+      async () => {},
+    );
+
+    fakeProc.stderr.push(
+      '[agent-runner] [codex] command completed: git status --short (status=completed, exit=0)\n',
+    );
+    fakeProc.stderr.push(
+      '[agent-runner] [codex] command output:\n  M src/container-runner.ts\n',
+    );
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'ok',
+      newSessionId: 'session-trace',
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    await resultPromise;
+
+    const logWrite = fsMock.writeFileSync.mock.calls.find(
+      ([filePath]) =>
+        typeof filePath === 'string' && filePath.includes('worker-'),
+    );
+
+    expect(logWrite).toBeDefined();
+    expect(String(logWrite?.[1])).toContain('=== Worker Trace ===');
+    expect(String(logWrite?.[1])).toContain(
+      '[agent-runner] [codex] command completed: git status --short (status=completed, exit=0)',
+    );
+    expect(String(logWrite?.[1])).toContain('M src/container-runner.ts');
   });
 
   it('passes sanitized remote MCP servers to the worker input', async () => {

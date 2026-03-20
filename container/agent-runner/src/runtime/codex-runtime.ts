@@ -16,6 +16,14 @@ import {
   RuntimeIpc,
 } from './types.js';
 
+type CodexConfigObject = NonNullable<CodexOptions['config']>;
+type CodexJsonValue =
+  | string
+  | number
+  | boolean
+  | CodexJsonValue[]
+  | CodexConfigObject;
+
 function parseBool(value: string | undefined, defaultValue: boolean): boolean {
   if (value == null) return defaultValue;
   const normalized = value.trim().toLowerCase();
@@ -33,17 +41,20 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 function deepMergeConfig(
-  lowerPriority: Record<string, unknown>,
-  higherPriority: Record<string, unknown>,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = { ...lowerPriority };
+  lowerPriority: CodexConfigObject,
+  higherPriority: CodexConfigObject,
+): CodexConfigObject {
+  const result: CodexConfigObject = { ...lowerPriority };
   for (const [key, value] of Object.entries(higherPriority)) {
     const existing = result[key];
     if (isPlainObject(existing) && isPlainObject(value)) {
-      result[key] = deepMergeConfig(existing, value);
+      result[key] = deepMergeConfig(
+        existing as CodexConfigObject,
+        value as CodexConfigObject,
+      );
       continue;
     }
-    result[key] = value;
+    result[key] = value as CodexJsonValue;
   }
   return result;
 }
@@ -138,6 +149,33 @@ function resolveHttpMcpBridgeLaunch(): { command: string; args: string[] } {
   };
 }
 
+const MAX_EVENT_LOG_TEXT = 4000;
+
+function truncateForLog(text: string, max = MAX_EVENT_LOG_TEXT): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}\n...[TRUNCATED]`;
+}
+
+function formatLogValue(value: unknown, max = MAX_EVENT_LOG_TEXT): string {
+  if (typeof value === 'string') {
+    return truncateForLog(value, max);
+  }
+
+  try {
+    return truncateForLog(JSON.stringify(value, null, 2), max);
+  } catch {
+    return truncateForLog(String(value), max);
+  }
+}
+
+function logBlock(label: string, value: unknown): string {
+  const formatted = formatLogValue(value)
+    .split('\n')
+    .map((line) => `  ${line}`)
+    .join('\n');
+  return `${label}:\n${formatted}`;
+}
+
 export function mergeNoProxyHosts(
   existingValue: string | undefined,
   hosts: string[] | undefined,
@@ -227,7 +265,7 @@ export function getCodexOptions(input: RunQueryInput): CodexOptions {
     ...remoteMcpServers,
   };
 
-  const baseConfig: Record<string, unknown> = {
+  const baseConfig: CodexConfigObject = {
     mcp_servers: mcpServers,
     sandbox_workspace_write: {
       writable_roots: runtimePaths.writableRoots,
@@ -246,8 +284,10 @@ export function getCodexOptions(input: RunQueryInput): CodexOptions {
         }
       : {}),
   };
-  const userConfig = isPlainObject(containerInput.agentConfig?.codexConfigOverrides)
-    ? containerInput.agentConfig?.codexConfigOverrides
+  const userConfig = isPlainObject(
+    containerInput.agentConfig?.codexConfigOverrides,
+  )
+    ? (containerInput.agentConfig.codexConfigOverrides as CodexConfigObject)
     : {};
 
   return {
@@ -257,22 +297,97 @@ export function getCodexOptions(input: RunQueryInput): CodexOptions {
   };
 }
 
-function eventSummary(event: ThreadEvent): string | null {
-  if (event.type === 'item.completed') {
-    if (event.item.type === 'command_execution') {
-      return `command completed: ${event.item.command} (status=${event.item.status})`;
-    }
-    if (event.item.type === 'mcp_tool_call') {
-      return `mcp tool call completed: ${event.item.server}/${event.item.tool}`;
-    }
+export function eventSummary(event: ThreadEvent): string[] {
+  if (event.type === 'thread.started') {
+    return [`thread started: ${event.thread_id}`];
   }
+
+  if (event.type === 'turn.started') {
+    return ['turn started'];
+  }
+
+  if (event.type === 'turn.completed') {
+    return [
+      `turn completed: input=${event.usage.input_tokens}, cached=${event.usage.cached_input_tokens}, output=${event.usage.output_tokens}`,
+    ];
+  }
+
   if (event.type === 'turn.failed') {
-    return `turn failed: ${event.error.message}`;
+    return [`turn failed: ${event.error.message}`];
   }
+
   if (event.type === 'error') {
-    return `stream error: ${event.message}`;
+    return [`stream error: ${event.message}`];
   }
-  return null;
+
+  const phase =
+    event.type === 'item.started'
+      ? 'started'
+      : event.type === 'item.updated'
+        ? 'updated'
+        : 'completed';
+
+  switch (event.item.type) {
+    case 'command_execution': {
+      const suffix = [
+        `status=${event.item.status}`,
+        ...(event.item.exit_code != null
+          ? [`exit=${event.item.exit_code}`]
+          : []),
+      ].join(', ');
+      const lines = [`command ${phase}: ${event.item.command} (${suffix})`];
+      if (
+        event.item.aggregated_output.trim() &&
+        event.type !== 'item.started'
+      ) {
+        lines.push(
+          logBlock('command output', event.item.aggregated_output.trim()),
+        );
+      }
+      return lines;
+    }
+
+    case 'mcp_tool_call': {
+      const lines = [
+        `mcp tool ${phase}: ${event.item.server}/${event.item.tool} (status=${event.item.status})`,
+        logBlock('tool arguments', event.item.arguments),
+      ];
+      if (event.item.result) {
+        lines.push(logBlock('tool result', event.item.result));
+      }
+      if (event.item.error?.message) {
+        lines.push(`tool error: ${event.item.error.message}`);
+      }
+      return lines;
+    }
+
+    case 'file_change':
+      return [
+        `file change ${phase}: ${event.item.changes.length} file(s) (status=${event.item.status})`,
+        logBlock('file changes', event.item.changes),
+      ];
+
+    case 'web_search':
+      return [`web search ${phase}: ${event.item.query}`];
+
+    case 'reasoning':
+      return [
+        `reasoning ${phase}`,
+        logBlock('reasoning summary', event.item.text),
+      ];
+
+    case 'todo_list':
+      return [
+        `todo list ${phase}: ${event.item.items.length} item(s)`,
+        logBlock('todo items', event.item.items),
+      ];
+
+    case 'error':
+      return [`item error ${phase}: ${event.item.message}`];
+
+    case 'agent_message':
+      return [];
+  }
 }
 
 function isAbortError(error: unknown): boolean {
@@ -284,6 +399,7 @@ function archiveCodexTurn(
   response: string,
   groupPath: string,
   threadId?: string,
+  taskSource?: string,
 ): void {
   const conversationsDir = path.join(groupPath, 'conversations');
   fs.mkdirSync(conversationsDir, { recursive: true });
@@ -294,18 +410,28 @@ function archiveCodexTurn(
   const filePath = path.join(conversationsDir, filename);
 
   const now = new Date().toISOString();
-  const content = [
-    `# Codex turn archive (${now})`,
-    '',
-    '## User',
-    '',
-    prompt,
-    '',
-    '## Assistant',
-    '',
-    response || '(empty)',
-    '',
-  ].join('\n');
+  const content =
+    taskSource === 'websocket'
+      ? [
+          `# Codex turn archive (${now})`,
+          '',
+          '## WebSocket task',
+          '',
+          '(details omitted)',
+          '',
+        ].join('\n')
+      : [
+          `# Codex turn archive (${now})`,
+          '',
+          '## User',
+          '',
+          prompt,
+          '',
+          '## Assistant',
+          '',
+          response || '(empty)',
+          '',
+        ].join('\n');
 
   fs.appendFileSync(filePath, content);
 }
@@ -420,8 +546,8 @@ export class CodexRuntime implements AgentRuntime {
           finalText = event.item.text || finalText;
         }
 
-        const summary = eventSummary(event);
-        if (summary) {
+        const summaries = eventSummary(event);
+        for (const summary of summaries) {
           this.hooks.onLog(`[codex] ${summary}`);
         }
       }
@@ -455,7 +581,13 @@ export class CodexRuntime implements AgentRuntime {
       };
     }
 
-    archiveCodexTurn(prompt, finalText, runtimePaths.groupPath, newSessionId);
+    archiveCodexTurn(
+      prompt,
+      finalText,
+      runtimePaths.groupPath,
+      newSessionId,
+      containerInput.taskSource,
+    );
     this.hooks.onResult(finalText || null, newSessionId || undefined);
 
     return {

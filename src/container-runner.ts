@@ -45,6 +45,7 @@ export interface ContainerInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
+  taskSource?: 'chat' | 'scheduled' | 'websocket';
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
@@ -324,15 +325,33 @@ function dedupePaths(paths: string[]): string[] {
   return result;
 }
 
-function findInstructionFile(rootPath: string): string | null {
-  for (const filename of ['AGENTS.md', 'CLAUDE.md']) {
-    const candidate = path.join(rootPath, filename);
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
+function findInstructionFiles(rootPath: string): string[] {
+  const filenames = ['AGENTS.md', 'CLAUDE.md', 'preferences.md'];
+  const nestedRoot = path.join(rootPath, 'groups', path.basename(rootPath));
+  const rootCandidates = filenames.map((filename) =>
+    path.join(rootPath, filename),
+  );
+  const legacyCandidates = filenames
+    .map((filename) => {
+      const rootCandidate = path.join(rootPath, filename);
+      const legacyCandidate = path.join(nestedRoot, filename);
+      if (fs.existsSync(rootCandidate)) {
+        return null;
+      }
+      return legacyCandidate;
+    })
+    .filter((candidate): candidate is string => candidate !== null);
+  const candidates = [...rootCandidates, ...legacyCandidates];
+
+  const files: string[] = [];
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate)) continue;
+    const content = fs.readFileSync(candidate, 'utf-8').trim();
+    if (!content) continue;
+    files.push(candidate);
   }
 
-  return null;
+  return files;
 }
 
 function resolveSnapshotTarget(
@@ -383,6 +402,10 @@ export function buildAgentExecutionLayout(
   fs.mkdirSync(groupPath, { recursive: true });
   fs.rmSync(contextRoot, { recursive: true, force: true });
 
+  for (const instructionFile of findInstructionFiles(groupPath)) {
+    sharedInstructionFiles.push(instructionFile);
+  }
+
   if (isMain) {
     readonlySnapshots.push({
       sourcePath: projectRoot,
@@ -416,8 +439,7 @@ export function buildAgentExecutionLayout(
 
       writableRoots.push(mount.hostPath);
       additionalDirectories.push(mount.hostPath);
-      const instructionFile = findInstructionFile(mount.hostPath);
-      if (instructionFile) {
+      for (const instructionFile of findInstructionFiles(mount.hostPath)) {
         sharedInstructionFiles.push(instructionFile);
       }
       snapshotMappings.push({
@@ -435,8 +457,7 @@ export function buildAgentExecutionLayout(
         removeEntries:
           snapshot.sourcePath === projectRoot ? ['.env'] : undefined,
       });
-      const instructionFile = findInstructionFile(snapshot.targetPath);
-      if (instructionFile) {
+      for (const instructionFile of findInstructionFiles(snapshot.targetPath)) {
         sharedInstructionFiles.push(instructionFile);
       }
       snapshotMappings.push({
@@ -771,6 +792,14 @@ export async function runContainerAgent(
 
         if (input.workerLogDetail?.includeResult === true) {
           logLines.push('=== Result ===', resultPreview || '(no result)', '');
+        }
+
+        if (stderr.trim()) {
+          logLines.push(
+            `=== Worker Trace${stderrTruncated ? ' (TRUNCATED)' : ''} ===`,
+            stderr,
+            '',
+          );
         }
       }
 

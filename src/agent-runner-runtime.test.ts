@@ -268,7 +268,9 @@ describe('CodexRuntime IPC interruption', () => {
     expect(toolLines).toContain(
       'mcp tool completed: gaussian_server/get_state (status=completed)',
     );
-    expect(toolLines.join('\n')).toContain('"entity_id": "climate.living_room"');
+    expect(toolLines.join('\n')).toContain(
+      '"entity_id": "climate.living_room"',
+    );
     expect(toolLines.join('\n')).toContain('"state": "cool"');
   });
 

@@ -58,6 +58,7 @@ async function loadCodexRuntimeModule(): Promise<{
     existingValue: string | undefined,
     hosts: string[] | undefined,
   ) => string | undefined;
+  eventSummary: (event: any) => string[];
 }> {
   const moduleUrl = pathToFileURL(
     path.join(
@@ -76,6 +77,7 @@ async function loadCodexRuntimeModule(): Promise<{
       existingValue: string | undefined,
       hosts: string[] | undefined,
     ) => string | undefined;
+    eventSummary: (event: any) => string[];
   };
 }
 
@@ -137,6 +139,7 @@ function createRunQueryInput(): any {
 describe('CodexRuntime IPC interruption', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.resetModules();
     vi.clearAllMocks();
   });
 
@@ -225,6 +228,48 @@ describe('CodexRuntime IPC interruption', () => {
       }),
     );
     expect(onResult).not.toHaveBeenCalled();
+  });
+
+  it('formats command and MCP tool activity for worker logs', async () => {
+    const { eventSummary } = await loadCodexRuntimeModule();
+
+    const commandLines = eventSummary({
+      type: 'item.completed',
+      item: {
+        id: 'cmd-1',
+        type: 'command_execution',
+        command: 'git status --short',
+        aggregated_output: 'M src/container-runner.ts',
+        exit_code: 0,
+        status: 'completed',
+      },
+    });
+    const toolLines = eventSummary({
+      type: 'item.completed',
+      item: {
+        id: 'tool-1',
+        type: 'mcp_tool_call',
+        server: 'gaussian_server',
+        tool: 'get_state',
+        arguments: { entity_id: 'climate.living_room' },
+        result: {
+          content: [],
+          structured_content: { state: 'cool' },
+        },
+        status: 'completed',
+      },
+    });
+
+    expect(commandLines).toContain(
+      'command completed: git status --short (status=completed, exit=0)',
+    );
+    expect(commandLines.join('\n')).toContain('command output:');
+    expect(commandLines.join('\n')).toContain('M src/container-runner.ts');
+    expect(toolLines).toContain(
+      'mcp tool completed: gaussian_server/get_state (status=completed)',
+    );
+    expect(toolLines.join('\n')).toContain('"entity_id": "climate.living_room"');
+    expect(toolLines.join('\n')).toContain('"state": "cool"');
   });
 
   it('merges configured remote MCP servers into the Codex config', async () => {

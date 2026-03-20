@@ -319,6 +319,48 @@ describe('container-runner worker execution', () => {
     expect(logWrite?.[1]).toContain('No user-facing action needed.');
   });
 
+  it('includes worker stderr trace in successful worker logs', async () => {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        prompt: 'Trace prompt',
+      },
+      () => {},
+      async () => {},
+    );
+
+    fakeProc.stderr.push(
+      '[agent-runner] [codex] command completed: git status --short (status=completed, exit=0)\n',
+    );
+    fakeProc.stderr.push(
+      '[agent-runner] [codex] command output:\n  M src/container-runner.ts\n',
+    );
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'ok',
+      newSessionId: 'session-trace',
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    await resultPromise;
+
+    const logWrite = fsMock.writeFileSync.mock.calls.find(
+      ([filePath]) =>
+        typeof filePath === 'string' && filePath.includes('worker-'),
+    );
+
+    expect(logWrite).toBeDefined();
+    expect(String(logWrite?.[1])).toContain('=== Worker Trace ===');
+    expect(String(logWrite?.[1])).toContain(
+      '[agent-runner] [codex] command completed: git status --short (status=completed, exit=0)',
+    );
+    expect(String(logWrite?.[1])).toContain('M src/container-runner.ts');
+  });
+
   it('passes sanitized remote MCP servers to the worker input', async () => {
     const onOutput = vi.fn(async () => {});
     const stdinChunks: Buffer[] = [];

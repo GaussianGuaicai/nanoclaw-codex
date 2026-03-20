@@ -793,6 +793,14 @@ export async function runContainerAgent(
         if (input.workerLogDetail?.includeResult === true) {
           logLines.push('=== Result ===', resultPreview || '(no result)', '');
         }
+
+        if (stderr.trim()) {
+          logLines.push(
+            `=== Worker Trace${stderrTruncated ? ' (TRUNCATED)' : ''} ===`,
+            stderr,
+            '',
+          );
+        }
       }
 
       fs.writeFileSync(logFile, logLines.join('\n'));

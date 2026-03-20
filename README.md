@@ -58,7 +58,7 @@ Core `.env` keys:
 OPENAI_API_KEY=sk-...
 # Optional
 OPENAI_BASE_URL=https://your-openai-compatible-endpoint.com
-NANOCLAW_CODEX_MODEL=gpt-5-codex
+NANOCLAW_CODEX_MODEL=gpt-5.4-mini
 NANOCLAW_CODEX_SANDBOX_MODE=workspace-write
 NANOCLAW_CODEX_APPROVAL_POLICY=never
 NANOCLAW_CODEX_NETWORK_ACCESS=true
@@ -82,7 +82,7 @@ Example:
 ```json
 {
   "defaults": {
-    "model": "gpt-5-codex",
+    "model": "gpt-5.4-mini",
     "reasoningEffort": "medium"
   },
   "bySource": {

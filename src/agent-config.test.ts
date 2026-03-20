@@ -55,7 +55,7 @@ describe('agent-config resolver', () => {
 
   it('uses legacy env defaults when no structured config exists', () => {
     readEnvFileMock.mockReturnValue({
-      NANOCLAW_CODEX_MODEL: 'gpt-5-codex',
+      NANOCLAW_CODEX_MODEL: 'gpt-5.4-mini',
       NANOCLAW_CODEX_REASONING_EFFORT: 'medium',
     });
 
@@ -66,7 +66,7 @@ describe('agent-config resolver', () => {
     expect(result).toEqual({
       ok: true,
       config: {
-        model: 'gpt-5-codex',
+        model: 'gpt-5.4-mini',
         reasoningEffort: 'medium',
       },
     });
@@ -151,6 +151,7 @@ describe('agent-config resolver', () => {
     expect(result).toEqual({
       ok: true,
       config: {
+        model: 'gpt-5.4-mini',
         reasoningEffort: 'low',
       },
     });

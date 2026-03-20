@@ -210,9 +210,9 @@ export interface ResolveAgentExecutionConfigError {
 }
 
 const sourceDefaults: Record<AgentTaskSource, AgentExecutionConfig> = {
-  chat: {},
-  scheduled: {},
-  websocket: { reasoningEffort: 'low' },
+  chat: { model: 'gpt-5.4-mini' },
+  scheduled: { model: 'gpt-5.4-mini' },
+  websocket: { model: 'gpt-5.4-mini', reasoningEffort: 'low' },
 };
 
 export function resolveAgentExecutionConfig(

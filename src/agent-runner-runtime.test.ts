@@ -249,7 +249,7 @@ describe('CodexRuntime IPC interruption', () => {
       item: {
         id: 'tool-1',
         type: 'mcp_tool_call',
-        server: 'gaussian_server',
+        server: 'automation_server',
         tool: 'get_state',
         arguments: { entity_id: 'climate.living_room' },
         result: {
@@ -266,7 +266,7 @@ describe('CodexRuntime IPC interruption', () => {
     expect(commandLines.join('\n')).toContain('command output:');
     expect(commandLines.join('\n')).toContain('M src/container-runner.ts');
     expect(toolLines).toContain(
-      'mcp tool completed: gaussian_server/get_state (status=completed)',
+      'mcp tool completed: automation_server/get_state (status=completed)',
     );
     expect(toolLines.join('\n')).toContain(
       '"entity_id": "climate.living_room"',

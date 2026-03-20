@@ -415,7 +415,7 @@ describe('WebSocketSourceManager', () => {
       occurredAt: '2026-03-12T08:00:00.000Z',
       payload: {
         event_type: 'state_changed',
-        data: { entity_id: 'switch.gaussian_pc' },
+        data: { entity_id: 'switch.workstation' },
       },
     };
 

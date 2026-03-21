@@ -19,6 +19,11 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
+  buildPromptWithBootstrap,
+  isContextSourceEnabled,
+  recordCompletedContextTurn,
+} from './context-runtime.js';
+import {
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -55,6 +60,7 @@ import {
   Channel,
   NewMessage,
   RegisteredGroup,
+  TurnUsage,
 } from './types.js';
 import { logger } from './logger.js';
 
@@ -206,9 +212,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  let finalResponse: string | null = null;
+  let latestUsage: TurnUsage | undefined;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
+    if (result.usage) {
+      latestUsage = result.usage;
+    }
     if (result.result) {
       const raw =
         typeof result.result === 'string'
@@ -220,6 +231,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (text) {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
+        finalResponse = text;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -237,7 +249,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
-  if (output === 'error' || hadError) {
+  if (output.status === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
@@ -257,6 +269,44 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
+  if (finalResponse) {
+    const participation = isContextSourceEnabled({ source: 'chat' });
+    if (participation.enabled) {
+      await recordCompletedContextTurn({
+        group,
+        chatJid,
+        source: 'chat',
+        userPrompt: prompt,
+        assistantResponse: finalResponse,
+        usage: latestUsage ?? output.usage,
+        closeWorker: () => queue.closeStdin(chatJid),
+        clearSessionCache: () => {
+          delete sessions[group.folder];
+        },
+        invokeInternalPrompt: async (internalPrompt) =>
+          runContainerAgent(
+            group,
+            {
+              prompt: internalPrompt,
+              groupFolder: group.folder,
+              chatJid,
+              isMain: group.isMain === true,
+              taskSource: 'chat',
+              maintenancePurpose: 'summary-memory',
+              suppressConversationArchive: true,
+              agentConfig: {
+                model: participation.config.summaryMemory.model,
+                reasoningEffort:
+                  participation.config.summaryMemory.reasoningEffort,
+              },
+            },
+            (proc, executionName) =>
+              queue.registerProcess(chatJid, proc, executionName, group.folder),
+          ),
+      });
+    }
+  }
+
   return true;
 }
 
@@ -265,9 +315,18 @@ async function runAgent(
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
-): Promise<'success' | 'error'> {
+): Promise<ContainerOutput> {
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
+  const participation = isContextSourceEnabled({ source: 'chat' });
+  const promptWithBootstrap = participation.enabled
+    ? buildPromptWithBootstrap({
+        groupFolder: group.folder,
+        source: 'chat',
+        prompt,
+        sessionId,
+      })
+    : prompt;
 
   // Update tasks snapshot for the worker to read (filtered by group)
   const tasks = getAllTasks();
@@ -319,13 +378,17 @@ async function runAgent(
         },
         'Rejecting chat task due to invalid agent config',
       );
-      return 'error';
+      return {
+        status: 'error',
+        result: null,
+        error: `Agent config error (${resolvedAgentConfig.scope}): ${resolvedAgentConfig.error}`,
+      };
     }
 
     const output = await runContainerAgent(
       group,
       {
-        prompt,
+        prompt: promptWithBootstrap,
         sessionId,
         groupFolder: group.folder,
         chatJid,
@@ -348,13 +411,16 @@ async function runAgent(
         { group: group.name, error: output.error },
         'Worker agent error',
       );
-      return 'error';
     }
 
-    return 'success';
+    return output;
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
-    return 'error';
+    return {
+      status: 'error',
+      result: null,
+      error: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 

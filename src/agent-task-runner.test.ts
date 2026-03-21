@@ -6,6 +6,7 @@ const {
   setSessionMock,
   getAllTasksMock,
   resolveAgentExecutionConfigMock,
+  contextRuntimeMock,
 } = vi.hoisted(() => ({
   runContainerAgentMock: vi.fn(),
   writeTasksSnapshotMock: vi.fn(),
@@ -15,6 +16,25 @@ const {
     ok: true,
     config: { model: 'gpt-5-codex' },
   })) as any,
+  contextRuntimeMock: {
+    isContextSourceEnabled: vi.fn(() => ({
+      enabled: false,
+      config: {
+        enabled: false,
+        summaryMemory: {
+          enabled: false,
+          model: 'gpt-5.4-mini',
+          reasoningEffort: 'low',
+          updateMinTurns: 2,
+          maxItemsPerList: 12,
+        },
+      },
+    })),
+    buildPromptWithBootstrap: vi.fn(
+      (params: { prompt: string }) => params.prompt,
+    ),
+    recordCompletedContextTurn: vi.fn(async () => {}),
+  },
 }));
 
 vi.mock('./container-runner.js', () => ({
@@ -29,6 +49,7 @@ vi.mock('./db.js', () => ({
 vi.mock('./agent-config.js', () => ({
   resolveAgentExecutionConfig: resolveAgentExecutionConfigMock,
 }));
+vi.mock('./context-runtime.js', () => contextRuntimeMock);
 
 import { runSingleTurnAgentTask } from './agent-task-runner.js';
 

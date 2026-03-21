@@ -41,14 +41,26 @@ export interface ContainerInput {
     writableRoots: string[];
     sharedInstructionFiles: string[];
   };
+  maintenancePurpose?: 'summary-memory';
+  suppressConversationArchive?: boolean;
   secrets?: Record<string, string>;
+}
+
+export interface TurnUsage {
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  outputTokens?: number;
 }
 
 export type RuntimeHook = (...args: any[]) => any;
 
 export interface RuntimeHooks {
   onLog: (message: string) => void;
-  onResult: (result: string | null, newSessionId?: string) => void;
+  onResult: (
+    result: string | null,
+    newSessionId?: string,
+    usage?: TurnUsage,
+  ) => void;
 }
 
 export interface RuntimeIpc {
@@ -72,6 +84,7 @@ export interface RunQueryResult {
   lastAssistantUuid?: string;
   closedDuringQuery: boolean;
   nextPrompt?: string;
+  usage?: TurnUsage;
 }
 
 export interface AgentRuntime {

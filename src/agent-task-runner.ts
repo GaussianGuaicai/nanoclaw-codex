@@ -8,6 +8,11 @@ import {
   runContainerAgent,
   writeTasksSnapshot,
 } from './container-runner.js';
+import {
+  buildPromptWithBootstrap,
+  isContextSourceEnabled,
+  recordCompletedContextTurn,
+} from './context-runtime.js';
 import { GroupQueue } from './group-queue.js';
 import {
   AgentExecutionConfig,
@@ -15,6 +20,7 @@ import {
   EventExecutionContextMode,
   RegisteredGroup,
   ScheduledTask,
+  TurnUsage,
 } from './types.js';
 
 export interface AgentTaskRunnerDeps {
@@ -45,6 +51,7 @@ export interface AgentTaskResult {
   status: 'success' | 'error';
   result: string | null;
   error: string | null;
+  usage?: TurnUsage;
 }
 
 function writeTaskSnapshot(group: RegisteredGroup): void {
@@ -88,11 +95,25 @@ export async function runSingleTurnAgentTask(
   const sessions = deps.getSessions();
   const sessionId =
     request.contextMode === 'group' ? sessions[group.folder] : undefined;
+  const contextParticipation = isContextSourceEnabled({
+    source: request.source,
+    contextMode: request.contextMode,
+  });
+  const promptWithBootstrap =
+    contextParticipation.enabled && request.contextMode === 'group'
+      ? buildPromptWithBootstrap({
+          groupFolder: group.folder,
+          source: request.source,
+          prompt: request.prompt,
+          sessionId,
+        })
+      : request.prompt;
 
   writeTaskSnapshot(group);
 
   let result: string | null = null;
   let error: string | null = null;
+  let usage: TurnUsage | undefined;
 
   const TASK_CLOSE_DELAY_MS = 10000;
   let closeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -105,6 +126,9 @@ export async function runSingleTurnAgentTask(
   };
 
   const handleOutput = async (output: ContainerOutput) => {
+    if (output.usage) {
+      usage = output.usage;
+    }
     if (request.contextMode === 'group' && output.newSessionId) {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
@@ -131,7 +155,7 @@ export async function runSingleTurnAgentTask(
     const output = await runContainerAgent(
       group,
       {
-        prompt: request.prompt,
+        prompt: promptWithBootstrap,
         sessionId,
         groupFolder: group.folder,
         chatJid: request.chatJid,
@@ -165,14 +189,58 @@ export async function runSingleTurnAgentTask(
     } else if (output.result) {
       result = output.result;
     }
+    if (output.usage) {
+      usage = output.usage;
+    }
   } catch (err) {
     if (closeTimer) clearTimeout(closeTimer);
     error = err instanceof Error ? err.message : String(err);
+  }
+
+  if (
+    !error &&
+    request.contextMode === 'group' &&
+    contextParticipation.enabled &&
+    result
+  ) {
+    await recordCompletedContextTurn({
+      group,
+      chatJid: request.chatJid,
+      source: request.source,
+      userPrompt: request.prompt,
+      assistantResponse: result,
+      usage,
+      closeWorker: () => deps.queue.closeStdin(request.chatJid),
+      clearSessionCache: () => {
+        delete sessions[group.folder];
+      },
+      invokeInternalPrompt: async (internalPrompt) =>
+        runContainerAgent(
+          group,
+          {
+            prompt: internalPrompt,
+            groupFolder: group.folder,
+            chatJid: request.chatJid,
+            taskSource: request.source,
+            isMain,
+            maintenancePurpose: 'summary-memory',
+            suppressConversationArchive: true,
+            agentConfig: {
+              model: contextParticipation.config.summaryMemory.model,
+              reasoningEffort:
+                contextParticipation.config.summaryMemory.reasoningEffort,
+            },
+          },
+          (proc, executionName) =>
+            deps.onProcess(request.chatJid, proc, executionName, group.folder),
+        ),
+    });
   }
 
   return {
     status: error ? 'error' : 'success',
     result,
     error,
+    usage,
   };
 }

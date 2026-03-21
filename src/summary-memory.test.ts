@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   buildSummaryUpdatePrompt,
@@ -70,5 +70,28 @@ describe('summary-memory', () => {
 
     expect(updated.repaired).toBe(true);
     expect(updated.yaml).toContain('session_state:');
+  });
+
+  it('does not trigger repair when the initial invoke itself fails', async () => {
+    const invoke = vi
+      .fn<(_: string) => Promise<string>>()
+      .mockRejectedValueOnce(new Error('network down'));
+
+    await expect(
+      updateSummaryMemory({
+        currentSummaryYaml: getDefaultSummaryYaml(),
+        deltaTurns: [],
+        config: {
+          enabled: true,
+          model: 'gpt-5.4-mini',
+          reasoningEffort: 'low',
+          updateMinTurns: 2,
+          maxItemsPerList: 4,
+        },
+        invoke,
+      }),
+    ).rejects.toThrow('network down');
+
+    expect(invoke).toHaveBeenCalledTimes(1);
   });
 });

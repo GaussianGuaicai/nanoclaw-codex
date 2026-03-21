@@ -17,6 +17,15 @@ export function formatMessages(messages: NewMessage[]): string {
   return `<messages>\n${lines.join('\n')}\n</messages>`;
 }
 
+export function formatContextTurnMessages(messages: NewMessage[]): string {
+  return messages
+    .map(
+      (m) =>
+        `[${m.timestamp}] ${m.sender_name}: ${m.content.replace(/\s+/g, ' ').trim()}`,
+    )
+    .join('\n');
+}
+
 export function stripInternalTags(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
 }

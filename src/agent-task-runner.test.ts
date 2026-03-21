@@ -170,4 +170,60 @@ describe('runSingleTurnAgentTask', () => {
     expect(result.error).toContain('Agent config error (task)');
     expect(runContainerAgentMock).not.toHaveBeenCalled();
   });
+
+  it('lets isolated tasks participate when isolatedTasks is enabled', async () => {
+    contextRuntimeMock.isContextSourceEnabled.mockReturnValueOnce({
+      enabled: true,
+      config: {
+        enabled: true,
+        summaryMemory: {
+          enabled: true,
+          model: 'gpt-5.4-mini',
+          reasoningEffort: 'low',
+          updateMinTurns: 2,
+          maxItemsPerList: 12,
+        },
+      },
+    });
+    contextRuntimeMock.buildPromptWithBootstrap.mockReturnValueOnce(
+      'bootstrapped prompt',
+    );
+    runContainerAgentMock.mockResolvedValue({
+      status: 'success',
+      result: 'ok',
+      newSessionId: 'fresh-session',
+    });
+
+    await runSingleTurnAgentTask(
+      { folder: 'team', isMain: false } as any,
+      {
+        chatJid: 'chat@g.us',
+        prompt: 'ping',
+        contextMode: 'isolated',
+        source: 'scheduled',
+      },
+      {
+        getSessions: () => ({}),
+        onProcess: () => {},
+        queue: {
+          closeStdin: vi.fn(),
+          notifyIdle: vi.fn(),
+        } as any,
+      },
+    );
+
+    expect(contextRuntimeMock.buildPromptWithBootstrap).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: 'ping',
+        sessionId: undefined,
+      }),
+    );
+    expect(contextRuntimeMock.recordCompletedContextTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contextMode: 'isolated',
+        userPrompt: 'ping',
+      }),
+    );
+    expect(setSessionMock).not.toHaveBeenCalled();
+  });
 });

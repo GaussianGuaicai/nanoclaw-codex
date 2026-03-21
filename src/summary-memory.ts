@@ -182,17 +182,9 @@ export async function updateSummaryMemory(params: {
     deltaTurns: params.deltaTurns,
   });
 
+  const output = await params.invoke(prompt);
   try {
-    const output = await params.invoke(prompt);
-    let doc: SummaryMemoryDocument;
-    try {
-      doc = parseSummaryMemoryYaml(output, params.config.maxItemsPerList);
-    } catch (error) {
-      throw new SummaryUpdateParseError(
-        output,
-        error instanceof Error ? error.message : String(error),
-      );
-    }
+    const doc = parseSummaryMemoryYaml(output, params.config.maxItemsPerList);
     return {
       yaml: stringifySummaryMemoryYaml(doc),
       repaired: false,
@@ -200,31 +192,20 @@ export async function updateSummaryMemory(params: {
   } catch (error) {
     const validationError =
       error instanceof Error ? error.message : String(error);
-    const initialOutput =
-      error instanceof SummaryUpdateParseError ? error.output : validationError;
-    const output = await params.invoke(
+    const repairOutput = await params.invoke(
       buildSummaryRepairPrompt({
-        invalidOutput: initialOutput,
+        invalidOutput: output,
         validationError,
       }),
     );
     const repaired = parseSummaryMemoryYaml(
-      output,
+      repairOutput,
       params.config.maxItemsPerList,
     );
     return {
       yaml: stringifySummaryMemoryYaml(repaired),
       repaired: true,
     };
-  }
-}
-
-export class SummaryUpdateParseError extends Error {
-  constructor(
-    public readonly output: string,
-    message: string,
-  ) {
-    super(message);
   }
 }
 

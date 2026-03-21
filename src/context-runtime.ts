@@ -9,24 +9,22 @@ import {
   insertContextTurn,
   updateGroupMemoryState,
 } from './db.js';
-import { RegisteredGroup } from './types.js';
 import { loadContextConfig } from './context-config.js';
 import { buildContextBootstrapPrompt } from './context-bootstrap.js';
 import {
-  shouldCompactContext,
   computeSlidingWindowBoundary,
+  shouldCompactContext,
 } from './context-compaction.js';
 import { estimateTokens } from './context-store.js';
 import { logger } from './logger.js';
 import { updateSummaryMemory } from './summary-memory.js';
 import {
   AgentTaskSource,
-  ContainerConfig,
-  ContextTurn,
   EventExecutionContextMode,
+  RegisteredGroup,
   TurnUsage,
 } from './types.js';
-import { ContainerOutput, runContainerAgent } from './container-runner.js';
+import { ContainerOutput } from './container-runner.js';
 
 export interface ContextParticipation {
   enabled: boolean;
@@ -46,9 +44,11 @@ export function isContextSourceEnabled(params: {
   const enabled =
     source === 'chat'
       ? config.sources.chat
-      : source === 'scheduled'
-        ? contextMode === 'group' && config.sources.scheduledGroupContext
-        : contextMode === 'group' && config.sources.websocketGroupContext;
+      : contextMode === 'group'
+        ? source === 'scheduled'
+          ? config.sources.scheduledGroupContext
+          : config.sources.websocketGroupContext
+        : config.sources.isolatedTasks;
 
   return { enabled, config };
 }
@@ -80,6 +80,7 @@ export async function recordCompletedContextTurn(params: {
   group: RegisteredGroup;
   chatJid: string;
   source: AgentTaskSource;
+  contextMode?: EventExecutionContextMode;
   userPrompt: string;
   assistantResponse: string | null;
   usage?: TurnUsage;
@@ -87,12 +88,13 @@ export async function recordCompletedContextTurn(params: {
   clearSessionCache: () => void;
   invokeInternalPrompt: (prompt: string) => Promise<ContainerOutput>;
 }): Promise<void> {
-  const { config } = isContextSourceEnabled({
+  const participation = isContextSourceEnabled({
     source: params.source,
-    contextMode: 'group',
+    contextMode: params.contextMode,
   });
-  if (!config.enabled) return;
+  if (!participation.enabled) return;
 
+  const { config } = participation;
   const now = new Date().toISOString();
   const batchId = randomUUID();
 
@@ -213,25 +215,4 @@ export async function recordCompletedContextTurn(params: {
     params.clearSessionCache();
     params.closeWorker();
   }
-}
-
-export async function invokeSummaryMaintenanceTurn(params: {
-  group: RegisteredGroup;
-  prompt: string;
-  chatJid: string;
-}): Promise<ContainerOutput> {
-  return runContainerAgent(
-    params.group,
-    {
-      prompt: params.prompt,
-      groupFolder: params.group.folder,
-      chatJid: params.chatJid,
-      isMain: params.group.isMain === true,
-      taskSource: 'chat',
-      maintenancePurpose: 'summary-memory',
-      suppressConversationArchive: true,
-      agentConfig: undefined,
-    },
-    () => {},
-  );
 }

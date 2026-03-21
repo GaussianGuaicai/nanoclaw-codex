@@ -1,42 +1,46 @@
 import { ContextTurn } from './types.js';
 
-function escapeXml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
 export function buildContextBootstrapPrompt(params: {
   summaryYaml: string;
   recentTurns: ContextTurn[];
   currentInput: string;
   currentSource: string;
 }): string {
-  const recentTurns = params.recentTurns
-    .map(
-      (turn) =>
-        `    <turn role="${turn.role}" source="${turn.source}" at="${turn.created_at}">${escapeXml(turn.content)}</turn>`,
-    )
-    .join('\n');
+  const recentTurnsBlock =
+    params.recentTurns.length > 0
+      ? params.recentTurns
+          .map((turn) =>
+            [
+              `- role: ${turn.role}`,
+              `  source: ${turn.source}`,
+              `  at: ${turn.created_at}`,
+              '  content: |',
+              indentBlock(turn.content, 4),
+            ].join('\n'),
+          )
+          .join('\n')
+      : '(none)';
 
   return [
-    '<context_bundle>',
-    '  <structured_summary format="yaml">',
+    'CONTEXT_BUNDLE',
+    '',
+    'STRUCTURED_SUMMARY_YAML:',
     params.summaryYaml.trim(),
-    '  </structured_summary>',
     '',
-    '  <recent_turns>',
-    recentTurns,
-    '  </recent_turns>',
+    'RECENT_TURNS:',
+    recentTurnsBlock,
     '',
-    `  <current_input source="${params.currentSource}">`,
-    escapeXml(params.currentInput),
-    '  </current_input>',
-    '</context_bundle>',
-  ]
-    .filter(Boolean)
+    'CURRENT_INPUT:',
+    `source: ${params.currentSource}`,
+    'content: |',
+    indentBlock(params.currentInput, 2),
+  ].join('\n');
+}
+
+function indentBlock(text: string, spaces: number): string {
+  const prefix = ' '.repeat(spaces);
+  return text
+    .split('\n')
+    .map((line) => `${prefix}${line}`)
     .join('\n');
 }

@@ -59,7 +59,7 @@ const partialContextConfigSchema = z.object({
 });
 
 const defaultContextConfig: ContextConfig = {
-  enabled: true,
+  enabled: false,
   summaryMemory: {
     enabled: true,
     model: 'gpt-5.4-mini',

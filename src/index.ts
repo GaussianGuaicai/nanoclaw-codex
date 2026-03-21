@@ -41,7 +41,12 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
-import { findChannel, formatMessages, formatOutbound } from './router.js';
+import {
+  findChannel,
+  formatContextTurnMessages,
+  formatMessages,
+  formatOutbound,
+} from './router.js';
 import {
   isSenderAllowed,
   isTriggerAllowed,
@@ -185,6 +190,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   const prompt = formatMessages(missedMessages);
+  const contextUserPrompt = formatContextTurnMessages(missedMessages);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -276,7 +282,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         group,
         chatJid,
         source: 'chat',
-        userPrompt: prompt,
+        contextMode: 'group',
+        userPrompt: contextUserPrompt,
         assistantResponse: finalResponse,
         usage: latestUsage ?? output.usage,
         closeWorker: () => queue.closeStdin(chatJid),

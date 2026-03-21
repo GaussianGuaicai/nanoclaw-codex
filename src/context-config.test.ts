@@ -21,6 +21,7 @@ describe('context-config', () => {
       '/tmp/definitely-missing-context-config.json',
     );
     expect(config).toEqual(getDefaultContextConfig());
+    expect(config.enabled).toBe(false);
   });
 
   it('merges partial config values with defaults', () => {

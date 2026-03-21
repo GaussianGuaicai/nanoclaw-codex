@@ -99,15 +99,14 @@ export async function runSingleTurnAgentTask(
     source: request.source,
     contextMode: request.contextMode,
   });
-  const promptWithBootstrap =
-    contextParticipation.enabled && request.contextMode === 'group'
-      ? buildPromptWithBootstrap({
-          groupFolder: group.folder,
-          source: request.source,
-          prompt: request.prompt,
-          sessionId,
-        })
-      : request.prompt;
+  const promptWithBootstrap = contextParticipation.enabled
+    ? buildPromptWithBootstrap({
+        groupFolder: group.folder,
+        source: request.source,
+        prompt: request.prompt,
+        sessionId,
+      })
+    : request.prompt;
 
   writeTaskSnapshot(group);
 
@@ -197,16 +196,12 @@ export async function runSingleTurnAgentTask(
     error = err instanceof Error ? err.message : String(err);
   }
 
-  if (
-    !error &&
-    request.contextMode === 'group' &&
-    contextParticipation.enabled &&
-    result
-  ) {
+  if (!error && contextParticipation.enabled && result) {
     await recordCompletedContextTurn({
       group,
       chatJid: request.chatJid,
       source: request.source,
+      contextMode: request.contextMode,
       userPrompt: request.prompt,
       assistantResponse: result,
       usage,

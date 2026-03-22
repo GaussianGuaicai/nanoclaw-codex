@@ -237,6 +237,15 @@ async function main(): Promise<void> {
       // Emit session update so host can track it
       writeOutput({ status: 'success', result: null, newSessionId: sessionId });
 
+      // Maintenance tasks are one-shot internal runs with no follow-up IPC input.
+      // Exiting here prevents them from idling until the outer host timeout.
+      if (containerInput.maintenancePurpose === 'summary-memory') {
+        log(
+          `Maintenance query completed (${containerInput.maintenancePurpose}), exiting`,
+        );
+        break;
+      }
+
       log('Query ended, waiting for next IPC message...');
 
       const nextMessage = await waitForIpcMessage(

@@ -25,7 +25,6 @@ import {
   AgentExecutionConfig,
   RegisteredGroup,
   RemoteMcpServerConfig,
-  TurnUsage,
 } from './types.js';
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -59,8 +58,6 @@ export interface ContainerInput {
     includePrompt?: boolean;
     includeResult?: boolean;
   };
-  maintenancePurpose?: 'summary-memory';
-  suppressConversationArchive?: boolean;
   secrets?: Record<string, string>;
 }
 
@@ -69,7 +66,6 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
-  usage?: TurnUsage;
 }
 
 interface SnapshotMapping {
@@ -593,7 +589,6 @@ export async function runContainerAgent(
 
     let parseBuffer = '';
     let newSessionId: string | undefined;
-    let latestUsage: TurnUsage | undefined;
     let outputChain = Promise.resolve();
     const streamedResults: string[] = [];
 
@@ -631,9 +626,6 @@ export async function runContainerAgent(
           const parsed: ContainerOutput = JSON.parse(jsonStr);
           if (parsed.newSessionId) {
             newSessionId = parsed.newSessionId;
-          }
-          if (parsed.usage) {
-            latestUsage = parsed.usage;
           }
           if (parsed.result) {
             const rawResult =
@@ -723,7 +715,6 @@ export async function runContainerAgent(
               status: 'success',
               result: null,
               newSessionId,
-              usage: latestUsage,
             });
           });
           return;
@@ -733,7 +724,6 @@ export async function runContainerAgent(
           status: 'error',
           result: null,
           error: `Worker timed out after ${configuredTimeout}ms`,
-          usage: latestUsage,
         });
         return;
       }
@@ -846,7 +836,6 @@ export async function runContainerAgent(
             status: 'success',
             result: null,
             newSessionId,
-            usage: latestUsage,
           });
         });
         return;
@@ -867,9 +856,6 @@ export async function runContainerAgent(
         }
 
         const output: ContainerOutput = JSON.parse(jsonLine);
-        if (output.usage) {
-          latestUsage = output.usage;
-        }
         logger.info(
           {
             group: group.name,
@@ -879,10 +865,7 @@ export async function runContainerAgent(
           },
           'Worker completed',
         );
-        resolve({
-          ...output,
-          usage: output.usage ?? latestUsage,
-        });
+        resolve(output);
       } catch (err) {
         logger.error(
           { group: group.name, stdout, stderr, error: err },

@@ -100,8 +100,6 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 
 ### Session Management
 - Each group maintains a conversation session (via Claude Agent SDK)
-- Structured session memory stores a YAML summary plus recent turns in SQLite (`context_turns`, `group_memory_state`)
-- `~/.config/nanoclaw/context-config.json` controls whether summary updates, bootstrap injection, and compaction are enabled
 - Sessions auto-compact when context gets too long, preserving critical information
 
 ### Container Isolation
@@ -175,7 +173,6 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 - `/setup` - Install dependencies, authenticate WhatsApp, configure scheduler, start services
 - `/customize` - General-purpose skill for adding capabilities (new channels like Telegram, new integrations, behavior changes)
 - `/update` - Pull upstream changes, merge with customizations, run migrations
-- `/context-memory` - Configure structured session memory, validate summary updates, and troubleshoot compaction
 
 ### Deployment
 - Runs on local Mac via launchd

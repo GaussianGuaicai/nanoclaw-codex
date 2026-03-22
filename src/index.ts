@@ -19,11 +19,6 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
-  buildPromptWithBootstrap,
-  isContextSourceEnabled,
-  recordCompletedContextTurn,
-} from './context-runtime.js';
-import {
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -41,12 +36,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
-import {
-  findChannel,
-  formatContextTurnMessages,
-  formatMessages,
-  formatOutbound,
-} from './router.js';
+import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   isSenderAllowed,
   isTriggerAllowed,
@@ -65,7 +55,6 @@ import {
   Channel,
   NewMessage,
   RegisteredGroup,
-  TurnUsage,
 } from './types.js';
 import { logger } from './logger.js';
 
@@ -190,7 +179,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   const prompt = formatMessages(missedMessages);
-  const contextUserPrompt = formatContextTurnMessages(missedMessages);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -218,14 +206,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
-  let finalResponse: string | null = null;
-  let latestUsage: TurnUsage | undefined;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
-    if (result.usage) {
-      latestUsage = result.usage;
-    }
     if (result.result) {
       const raw =
         typeof result.result === 'string'
@@ -237,7 +220,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (text) {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
-        finalResponse = text;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -255,7 +237,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
-  if (output.status === 'error' || hadError) {
+  if (output === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
@@ -275,45 +257,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
-  if (finalResponse) {
-    const participation = isContextSourceEnabled({ source: 'chat' });
-    if (participation.enabled) {
-      await recordCompletedContextTurn({
-        group,
-        chatJid,
-        source: 'chat',
-        contextMode: 'group',
-        userPrompt: contextUserPrompt,
-        assistantResponse: finalResponse,
-        usage: latestUsage ?? output.usage,
-        closeWorker: () => queue.closeStdin(chatJid),
-        clearSessionCache: () => {
-          delete sessions[group.folder];
-        },
-        invokeInternalPrompt: async (internalPrompt) =>
-          runContainerAgent(
-            group,
-            {
-              prompt: internalPrompt,
-              groupFolder: group.folder,
-              chatJid,
-              isMain: group.isMain === true,
-              taskSource: 'chat',
-              maintenancePurpose: 'summary-memory',
-              suppressConversationArchive: true,
-              agentConfig: {
-                model: participation.config.summaryMemory.model,
-                reasoningEffort:
-                  participation.config.summaryMemory.reasoningEffort,
-              },
-            },
-            (proc, executionName) =>
-              queue.registerProcess(chatJid, proc, executionName, group.folder),
-          ),
-      });
-    }
-  }
-
   return true;
 }
 
@@ -322,18 +265,9 @@ async function runAgent(
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
-): Promise<ContainerOutput> {
+): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
-  const participation = isContextSourceEnabled({ source: 'chat' });
-  const promptWithBootstrap = participation.enabled
-    ? buildPromptWithBootstrap({
-        groupFolder: group.folder,
-        source: 'chat',
-        prompt,
-        sessionId,
-      })
-    : prompt;
 
   // Update tasks snapshot for the worker to read (filtered by group)
   const tasks = getAllTasks();
@@ -385,17 +319,13 @@ async function runAgent(
         },
         'Rejecting chat task due to invalid agent config',
       );
-      return {
-        status: 'error',
-        result: null,
-        error: `Agent config error (${resolvedAgentConfig.scope}): ${resolvedAgentConfig.error}`,
-      };
+      return 'error';
     }
 
     const output = await runContainerAgent(
       group,
       {
-        prompt: promptWithBootstrap,
+        prompt,
         sessionId,
         groupFolder: group.folder,
         chatJid,
@@ -418,16 +348,13 @@ async function runAgent(
         { group: group.name, error: output.error },
         'Worker agent error',
       );
+      return 'error';
     }
 
-    return output;
+    return 'success';
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
-    return {
-      status: 'error',
-      result: null,
-      error: err instanceof Error ? err.message : String(err),
-    };
+    return 'error';
   }
 }
 

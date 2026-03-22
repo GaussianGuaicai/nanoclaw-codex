@@ -3,7 +3,6 @@ import { describe, it, expect } from 'vitest';
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from './config.js';
 import {
   escapeXml,
-  formatContextTurnMessages,
   formatMessages,
   formatOutbound,
   stripInternalTags,
@@ -102,31 +101,6 @@ describe('formatMessages', () => {
   it('handles empty array', () => {
     const result = formatMessages([]);
     expect(result).toBe('<messages>\n\n</messages>');
-  });
-});
-
-describe('formatContextTurnMessages', () => {
-  it('formats chat messages as plain text for context storage', () => {
-    const result = formatContextTurnMessages([
-      makeMsg({
-        sender_name: 'Alice',
-        content: 'hello',
-        timestamp: '2026-03-21T00:00:01.000Z',
-      }),
-      makeMsg({
-        id: '2',
-        sender_name: 'Bob',
-        content: 'please check the config',
-        timestamp: '2026-03-21T00:00:05.000Z',
-      }),
-    ]);
-
-    expect(result).toBe(
-      '[2026-03-21T00:00:01.000Z] Alice: hello\n' +
-        '[2026-03-21T00:00:05.000Z] Bob: please check the config',
-    );
-    expect(result).not.toContain('<messages>');
-    expect(result).not.toContain('<message');
   });
 });
 

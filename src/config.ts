@@ -45,12 +45,6 @@ export const AGENT_CONFIG_PATH = path.join(
   'nanoclaw',
   'agent-config.json',
 );
-export const CONTEXT_CONFIG_PATH = path.join(
-  HOME_DIR,
-  '.config',
-  'nanoclaw',
-  'context-config.json',
-);
 export const LOGS_DIR = path.resolve(PROJECT_ROOT, 'logs');
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');

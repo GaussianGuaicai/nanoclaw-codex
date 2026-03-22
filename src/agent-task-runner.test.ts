@@ -6,7 +6,6 @@ const {
   setSessionMock,
   getAllTasksMock,
   resolveAgentExecutionConfigMock,
-  contextRuntimeMock,
 } = vi.hoisted(() => ({
   runContainerAgentMock: vi.fn(),
   writeTasksSnapshotMock: vi.fn(),
@@ -16,25 +15,6 @@ const {
     ok: true,
     config: { model: 'gpt-5-codex' },
   })) as any,
-  contextRuntimeMock: {
-    isContextSourceEnabled: vi.fn(() => ({
-      enabled: false,
-      config: {
-        enabled: false,
-        summaryMemory: {
-          enabled: false,
-          model: 'gpt-5.4-mini',
-          reasoningEffort: 'low',
-          updateMinTurns: 2,
-          maxItemsPerList: 12,
-        },
-      },
-    })),
-    buildPromptWithBootstrap: vi.fn(
-      (params: { prompt: string }) => params.prompt,
-    ),
-    recordCompletedContextTurn: vi.fn(async () => {}),
-  },
 }));
 
 vi.mock('./container-runner.js', () => ({
@@ -49,7 +29,6 @@ vi.mock('./db.js', () => ({
 vi.mock('./agent-config.js', () => ({
   resolveAgentExecutionConfig: resolveAgentExecutionConfigMock,
 }));
-vi.mock('./context-runtime.js', () => contextRuntimeMock);
 
 import { runSingleTurnAgentTask } from './agent-task-runner.js';
 
@@ -169,61 +148,5 @@ describe('runSingleTurnAgentTask', () => {
     expect(result.status).toBe('error');
     expect(result.error).toContain('Agent config error (task)');
     expect(runContainerAgentMock).not.toHaveBeenCalled();
-  });
-
-  it('lets isolated tasks participate when isolatedTasks is enabled', async () => {
-    contextRuntimeMock.isContextSourceEnabled.mockReturnValueOnce({
-      enabled: true,
-      config: {
-        enabled: true,
-        summaryMemory: {
-          enabled: true,
-          model: 'gpt-5.4-mini',
-          reasoningEffort: 'low',
-          updateMinTurns: 2,
-          maxItemsPerList: 12,
-        },
-      },
-    });
-    contextRuntimeMock.buildPromptWithBootstrap.mockReturnValueOnce(
-      'bootstrapped prompt',
-    );
-    runContainerAgentMock.mockResolvedValue({
-      status: 'success',
-      result: 'ok',
-      newSessionId: 'fresh-session',
-    });
-
-    await runSingleTurnAgentTask(
-      { folder: 'team', isMain: false } as any,
-      {
-        chatJid: 'chat@g.us',
-        prompt: 'ping',
-        contextMode: 'isolated',
-        source: 'scheduled',
-      },
-      {
-        getSessions: () => ({}),
-        onProcess: () => {},
-        queue: {
-          closeStdin: vi.fn(),
-          notifyIdle: vi.fn(),
-        } as any,
-      },
-    );
-
-    expect(contextRuntimeMock.buildPromptWithBootstrap).toHaveBeenCalledWith(
-      expect.objectContaining({
-        prompt: 'ping',
-        sessionId: undefined,
-      }),
-    );
-    expect(contextRuntimeMock.recordCompletedContextTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        contextMode: 'isolated',
-        userPrompt: 'ping',
-      }),
-    );
-    expect(setSessionMock).not.toHaveBeenCalled();
   });
 });

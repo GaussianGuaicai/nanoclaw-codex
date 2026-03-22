@@ -4,7 +4,7 @@ Personal AI assistant. See [README.md](README.md) for philosophy and setup. See 
 
 ## Quick Context
 
-Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to a local Codex worker process. Each group has isolated `CODEX_HOME`, IPC, and host-prepared workspace state.
+Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to a local Codex worker process. Each group has isolated `CODEX_HOME`, IPC, host-prepared workspace state, and optional structured session memory backed by SQLite plus host config in `~/.config/nanoclaw/context-config.json`.
 
 ## Key Files
 
@@ -18,6 +18,10 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `src/container-runner.ts` | Prepares sandbox layout and spawns the local Codex worker |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
+| `src/context-runtime.ts` | Records turns, updates summaries, and runs compaction |
+| `src/context-bootstrap.ts` | Builds the `CONTEXT_BUNDLE` for fresh sessions |
+| `src/summary-memory.ts` | Defines the structured YAML summary workflow |
+| `docs/CONTEXT_MEMORY.md` | Operator guide for context memory and compaction |
 | `groups/{name}/AGENTS.md` | Per-group memory (isolated) |
 | `container/skills/agent-browser/SKILL.md` | Browser automation tool (available to all agents via Bash) |
 
@@ -28,6 +32,7 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `/setup` | First-time installation, authentication, service configuration |
 | `/customize` | Adding channels, integrations, changing behavior |
 | `/debug` | Worker runtime issues, logs, troubleshooting |
+| `/context-memory` | Enable, verify, and troubleshoot structured session memory and compaction |
 | `/update-nanoclaw` | Bring upstream NanoClaw updates into a customized install |
 
 ## Development
@@ -55,3 +60,5 @@ systemctl --user restart nanoclaw
 ## Troubleshooting
 
 **WhatsApp not connecting after upgrade:** WhatsApp is now a separate skill, not bundled in core. Run `/add-whatsapp` (or `npx tsx scripts/apply-skill.ts .claude/skills/add-whatsapp && npm run build`) to install it. Existing auth credentials and groups are preserved.
+
+**Context memory not updating:** Check `~/.config/nanoclaw/context-config.json`, then inspect `store/messages.db` tables `context_turns` and `group_memory_state`. Use `/context-memory` and [docs/CONTEXT_MEMORY.md](docs/CONTEXT_MEMORY.md) for the expected flow.

@@ -87,6 +87,8 @@ claude
 - "当我说早上好的时候，加一个自定义的问候"
 - "每周存储一次对话摘要"
 
+结构化会话记忆使用单独的主机配置文件 `~/.config/nanoclaw/context-config.json`。它默认关闭；启用后会记录每个群组的 turns、维护 YAML 摘要，并在上下文变长时做压缩。详见 [docs/CONTEXT_MEMORY.md](docs/CONTEXT_MEMORY.md) 和 `/context-memory` 技能。
+
 或者运行 `/customize` 进行引导式修改。
 
 代码库足够小，Claude 可以安全地修改它。

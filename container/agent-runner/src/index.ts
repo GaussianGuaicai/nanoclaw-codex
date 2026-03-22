@@ -26,6 +26,7 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  usage?: import('./runtime/types.js').TurnUsage;
 }
 
 const IPC_POLL_MS = 500;
@@ -166,8 +167,8 @@ async function main(): Promise<void> {
   const runtime = createAgentRuntime(
     {
       onLog: log,
-      onResult: (result, newSessionId) => {
-        writeOutput({ status: 'success', result, newSessionId });
+      onResult: (result, newSessionId, usage) => {
+        writeOutput({ status: 'success', result, newSessionId, usage });
       },
     },
     {
@@ -236,6 +237,15 @@ async function main(): Promise<void> {
       // Emit session update so host can track it
       writeOutput({ status: 'success', result: null, newSessionId: sessionId });
 
+      // Maintenance tasks are one-shot internal runs with no follow-up IPC input.
+      // Exiting here prevents them from idling until the outer host timeout.
+      if (containerInput.maintenancePurpose === 'summary-memory') {
+        log(
+          `Maintenance query completed (${containerInput.maintenancePurpose}), exiting`,
+        );
+        break;
+      }
+
       log('Query ended, waiting for next IPC message...');
 
       const nextMessage = await waitForIpcMessage(
@@ -257,7 +267,7 @@ async function main(): Promise<void> {
       status: 'error',
       result: null,
       newSessionId: sessionId,
-      error: errorMessage
+      error: errorMessage,
     });
     process.exit(1);
   }

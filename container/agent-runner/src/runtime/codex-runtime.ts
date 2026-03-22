@@ -14,6 +14,7 @@ import {
   RunQueryResult,
   RuntimeHooks,
   RuntimeIpc,
+  TurnUsage,
 } from './types.js';
 
 type CodexConfigObject = NonNullable<CodexOptions['config']>;
@@ -527,6 +528,7 @@ export class CodexRuntime implements AgentRuntime {
 
     let finalText = '';
     let newSessionId = thread.id || sessionId || undefined;
+    let usage: TurnUsage | undefined;
 
     pollTimer = setTimeout(pollIpcDuringQuery, this.ipc.ipcPollMs);
 
@@ -544,6 +546,14 @@ export class CodexRuntime implements AgentRuntime {
           event.item.type === 'agent_message'
         ) {
           finalText = event.item.text || finalText;
+        }
+
+        if (event.type === 'turn.completed') {
+          usage = {
+            inputTokens: event.usage.input_tokens,
+            cachedInputTokens: event.usage.cached_input_tokens,
+            outputTokens: event.usage.output_tokens,
+          };
         }
 
         const summaries = eventSummary(event);
@@ -569,6 +579,7 @@ export class CodexRuntime implements AgentRuntime {
         newSessionId: newSessionId || undefined,
         lastAssistantUuid: undefined,
         closedDuringQuery: true,
+        usage,
       };
     }
 
@@ -578,22 +589,26 @@ export class CodexRuntime implements AgentRuntime {
         lastAssistantUuid: undefined,
         closedDuringQuery: false,
         nextPrompt,
+        usage,
       };
     }
 
-    archiveCodexTurn(
-      prompt,
-      finalText,
-      runtimePaths.groupPath,
-      newSessionId,
-      containerInput.taskSource,
-    );
-    this.hooks.onResult(finalText || null, newSessionId || undefined);
+    if (containerInput.suppressConversationArchive !== true) {
+      archiveCodexTurn(
+        prompt,
+        finalText,
+        runtimePaths.groupPath,
+        newSessionId,
+        containerInput.taskSource,
+      );
+    }
+    this.hooks.onResult(finalText || null, newSessionId || undefined, usage);
 
     return {
       newSessionId: newSessionId || undefined,
       lastAssistantUuid: undefined,
       closedDuringQuery: false,
+      usage,
     };
   }
 }

@@ -6,12 +6,16 @@ import {
   deleteTask,
   getAllChats,
   getAllRegisteredGroups,
+  getContextTurnsAfterId,
+  getOrCreateGroupMemoryState,
   getMessagesSince,
   getNewMessages,
   getTaskById,
+  insertContextTurn,
   setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
+  updateGroupMemoryState,
   updateTask,
 } from './db.js';
 
@@ -295,6 +299,50 @@ describe('getNewMessages', () => {
     const { messages, newTimestamp } = getNewMessages([], '', 'Andy');
     expect(messages).toHaveLength(0);
     expect(newTimestamp).toBe('');
+  });
+});
+
+describe('context memory state', () => {
+  it('creates a default group memory state lazily', () => {
+    const state = getOrCreateGroupMemoryState('main');
+    expect(state.group_folder).toBe('main');
+    expect(state.last_summarized_turn_id).toBe(0);
+    expect(state.summary_yaml).toContain('session_state:');
+  });
+
+  it('stores and queries context turns by group and boundary', () => {
+    insertContextTurn({
+      group_folder: 'main',
+      chat_jid: 'main@g.us',
+      source: 'chat',
+      role: 'user',
+      content: 'hello',
+      created_at: '2026-03-20T00:00:00.000Z',
+      est_tokens: 2,
+    });
+    insertContextTurn({
+      group_folder: 'main',
+      chat_jid: 'main@g.us',
+      source: 'chat',
+      role: 'assistant',
+      content: 'world',
+      created_at: '2026-03-20T00:00:01.000Z',
+      est_tokens: 2,
+    });
+
+    const turns = getContextTurnsAfterId('main', 0);
+    expect(turns).toHaveLength(2);
+    expect(turns[1].role).toBe('assistant');
+  });
+
+  it('updates persisted group memory state fields', () => {
+    const updated = updateGroupMemoryState('main', {
+      last_summarized_turn_id: 10,
+      last_input_tokens: 123,
+    });
+
+    expect(updated.last_summarized_turn_id).toBe(10);
+    expect(getOrCreateGroupMemoryState('main').last_input_tokens).toBe(123);
   });
 });
 

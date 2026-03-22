@@ -98,6 +98,8 @@ Precedence:
 
 Per-group Codex state lives under `data/sessions/{group}/.codex`. That directory is used as `CODEX_HOME`, so each group gets isolated session history, auth state, logs, and local Codex metadata.
 
+Structured session memory is configured separately through `~/.config/nanoclaw/context-config.json`. It is off by default, and when enabled it records per-group turns, maintains a YAML summary, and can compact old context. See [docs/CONTEXT_MEMORY.md](docs/CONTEXT_MEMORY.md) and the `/context-memory` skill.
+
 ## Remote MCP and Event Sources
 
 Remote MCP servers can now be attached per group through `containerConfig.mcpServers`.
@@ -135,6 +137,7 @@ The runtime defaults to `workspace-write` sandbox mode with `approval_policy=nev
 
 - Group-isolated memory via `groups/*/AGENTS.md`
 - Per-group Codex session state via `data/sessions/*/.codex`
+- Structured session memory and sliding-window compaction via `~/.config/nanoclaw/context-config.json`
 - Scheduled tasks that run through the same local worker
 - File-based IPC between the host orchestrator and the worker MCP server
 - Per-group remote MCP server attachments

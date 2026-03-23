@@ -16,6 +16,7 @@ import {
   RuntimeIpc,
   TurnUsage,
 } from './types.js';
+import { formatLocalDate, formatLocalIsoTimestamp } from './time.js';
 
 type CodexConfigObject = NonNullable<CodexOptions['config']>;
 type CodexJsonValue =
@@ -405,12 +406,12 @@ function archiveCodexTurn(
   const conversationsDir = path.join(groupPath, 'conversations');
   fs.mkdirSync(conversationsDir, { recursive: true });
 
-  const date = new Date().toISOString().split('T')[0];
+  const date = formatLocalDate();
   const suffix = threadId ? `codex-${threadId}` : 'codex-session';
   const filename = `${date}-${suffix}.md`;
   const filePath = path.join(conversationsDir, filename);
 
-  const now = new Date().toISOString();
+  const now = formatLocalIsoTimestamp();
   const content =
     taskSource === 'websocket'
       ? [

@@ -275,6 +275,8 @@ describe('container-runner worker execution', () => {
   });
 
   it('writes prompt and streamed result into worker log when enabled', async () => {
+    mockExistingPaths(['/tmp/nanoclaw-test-groups/test-group/preferences.md']);
+
     const resultPromise = runContainerAgent(
       testGroup,
       {
@@ -313,6 +315,10 @@ describe('container-runner worker execution', () => {
     expect(logWrite?.[1]).toContain('=== Prompt ===');
     expect(logWrite?.[1]).toMatch(
       /Timestamp: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}/,
+    );
+    expect(logWrite?.[1]).toContain('=== Shared Instructions ===');
+    expect(logWrite?.[1]).toContain(
+      '/tmp/nanoclaw-test-groups/test-group/preferences.md',
     );
     expect(logWrite?.[1]).toContain('WebSocket-triggered prompt body');
     expect(logWrite?.[1]).toContain('=== Result ===');
@@ -470,6 +476,7 @@ describe('container-runner worker execution', () => {
   });
 
   it('timeout with no output resolves as error', async () => {
+    mockExistingPaths(['/tmp/nanoclaw-test-groups/test-group/preferences.md']);
     const onOutput = vi.fn(async () => {});
     const resultPromise = runContainerAgent(
       testGroup,
@@ -486,6 +493,17 @@ describe('container-runner worker execution', () => {
     expect(result.status).toBe('error');
     expect(result.error).toContain('timed out');
     expect(onOutput).not.toHaveBeenCalled();
+
+    const timeoutLog = fsMock.writeFileSync.mock.calls.find(
+      ([, content]) =>
+        typeof content === 'string' &&
+        content.includes('=== Agent Run Log (TIMEOUT) ==='),
+    );
+    expect(timeoutLog).toBeDefined();
+    expect(String(timeoutLog?.[1])).toContain('=== Shared Instructions ===');
+    expect(String(timeoutLog?.[1])).toContain(
+      '/tmp/nanoclaw-test-groups/test-group/preferences.md',
+    );
   });
 
   it('launches a local worker and injects runtimePaths into the worker input', async () => {

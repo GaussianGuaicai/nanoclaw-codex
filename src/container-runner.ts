@@ -710,6 +710,8 @@ export async function runContainerAgent(
             `Duration: ${duration}ms`,
             `Exit Code: ${code}`,
             `Had Streaming Output: ${hadStreamingOutput}`,
+            '=== Shared Instructions ===',
+            layout.sharedInstructionFiles.join('\n') || '(none)',
           ].join('\n'),
         );
 
@@ -793,6 +795,9 @@ export async function runContainerAgent(
           '',
           '=== Writable Roots ===',
           layout.writableRoots.join('\n') || '(none)',
+          '',
+          '=== Shared Instructions ===',
+          layout.sharedInstructionFiles.join('\n') || '(none)',
           '',
         );
 

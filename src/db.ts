@@ -191,6 +191,16 @@ export function initDatabase(): void {
 
   db = new Database(dbPath);
   createSchema(db);
+  const sessionMigration = migrateLegacyLiveSessions();
+  if (sessionMigration.migrated > 0 || sessionMigration.dropped > 0) {
+    logger.info(
+      {
+        migrated: sessionMigration.migrated,
+        dropped: sessionMigration.dropped,
+      },
+      'Migrated legacy live session keys',
+    );
+  }
 
   // Migrate from JSON files if they exist
   migrateJsonState();
@@ -609,6 +619,46 @@ export function getAllSessions(): Record<string, string> {
     result[row.group_folder] = row.session_id;
   }
   return result;
+}
+
+export function migrateLegacyLiveSessions(): {
+  migrated: number;
+  dropped: number;
+} {
+  const legacyRows = db
+    .prepare(
+      `
+      SELECT group_folder, session_id
+      FROM sessions
+      WHERE instr(group_folder, '::') = 0
+    `,
+    )
+    .all() as Array<{ group_folder: string; session_id: string }>;
+
+  let migrated = 0;
+  let dropped = 0;
+
+  for (const row of legacyRows) {
+    const targetKey = `${row.group_folder}::chat`;
+    const existingScoped = db
+      .prepare('SELECT 1 FROM sessions WHERE group_folder = ?')
+      .get(targetKey) as { 1: number } | undefined;
+
+    if (existingScoped) {
+      db.prepare('DELETE FROM sessions WHERE group_folder = ?').run(
+        row.group_folder,
+      );
+      dropped += 1;
+      continue;
+    }
+
+    db.prepare(
+      'UPDATE sessions SET group_folder = ? WHERE group_folder = ?',
+    ).run(targetKey, row.group_folder);
+    migrated += 1;
+  }
+
+  return { migrated, dropped };
 }
 
 export function clearSession(groupFolder: string): void {

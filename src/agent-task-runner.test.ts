@@ -17,6 +17,14 @@ const {
     config: { model: 'gpt-5-codex' },
   })) as any,
   contextRuntimeMock: {
+    buildLiveSessionKey: vi.fn(
+      (params: { groupFolder: string; source: string; contextMode?: string }) =>
+        params.source === 'chat'
+          ? `${params.groupFolder}::chat`
+          : params.contextMode === 'group'
+            ? `${params.groupFolder}::${params.source}`
+            : undefined,
+    ),
     isContextSourceEnabled: vi.fn(() => ({
       enabled: false,
       config: {
@@ -72,7 +80,9 @@ describe('runSingleTurnAgentTask', () => {
       newSessionId: 'isolated-session',
     });
 
-    const sessions: Record<string, string> = { team: 'existing-session' };
+    const sessions: Record<string, string> = {
+      'team::scheduled': 'existing-session',
+    };
 
     const result = await runSingleTurnAgentTask(
       { folder: 'team', isMain: false } as any,
@@ -93,7 +103,7 @@ describe('runSingleTurnAgentTask', () => {
     );
 
     expect(result.status).toBe('success');
-    expect(sessions.team).toBe('existing-session');
+    expect(sessions['team::scheduled']).toBe('existing-session');
     expect(setSessionMock).not.toHaveBeenCalled();
   });
 
@@ -114,7 +124,9 @@ describe('runSingleTurnAgentTask', () => {
       },
     );
 
-    const sessions: Record<string, string> = { team: 'existing-session' };
+    const sessions: Record<string, string> = {
+      'team::scheduled': 'existing-session',
+    };
 
     await runSingleTurnAgentTask(
       { folder: 'team', isMain: false } as any,
@@ -134,14 +146,18 @@ describe('runSingleTurnAgentTask', () => {
       },
     );
 
-    expect(sessions.team).toBe('final-session');
+    expect(sessions['team::scheduled']).toBe('final-session');
     expect(setSessionMock).toHaveBeenCalledTimes(2);
     expect(setSessionMock).toHaveBeenNthCalledWith(
       1,
-      'team',
+      'team::scheduled',
       'streamed-session',
     );
-    expect(setSessionMock).toHaveBeenNthCalledWith(2, 'team', 'final-session');
+    expect(setSessionMock).toHaveBeenNthCalledWith(
+      2,
+      'team::scheduled',
+      'final-session',
+    );
   });
 
   it('fails fast when resolved agent config is invalid', async () => {
@@ -266,7 +282,9 @@ describe('runSingleTurnAgentTask', () => {
       newSessionId: 'fresh-session',
     });
 
-    const sessions: Record<string, string> = { team: 'oversized-session' };
+    const sessions: Record<string, string> = {
+      'team::scheduled': 'oversized-session',
+    };
 
     await runSingleTurnAgentTask(
       { folder: 'team', isMain: false } as any,
@@ -291,6 +309,7 @@ describe('runSingleTurnAgentTask', () => {
     ).toHaveBeenCalledWith(
       expect.objectContaining({
         groupFolder: 'team',
+        sessionKey: 'team::scheduled',
         sessionId: 'oversized-session',
       }),
     );
@@ -299,6 +318,6 @@ describe('runSingleTurnAgentTask', () => {
         sessionId: undefined,
       }),
     );
-    expect(sessions.team).toBe('fresh-session');
+    expect(sessions['team::scheduled']).toBe('fresh-session');
   });
 });

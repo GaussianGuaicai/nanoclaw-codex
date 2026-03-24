@@ -76,8 +76,25 @@ export function buildPromptWithBootstrap(params: {
   });
 }
 
+export function buildLiveSessionKey(params: {
+  groupFolder: string;
+  source: AgentTaskSource;
+  contextMode?: EventExecutionContextMode;
+}): string | undefined {
+  if (params.source === 'chat') {
+    return `${params.groupFolder}::chat`;
+  }
+
+  if (params.contextMode !== 'group') {
+    return undefined;
+  }
+
+  return `${params.groupFolder}::${params.source}`;
+}
+
 export function prepareContextSessionForTurn(params: {
   groupFolder: string;
+  sessionKey: string;
   sessionId?: string;
   config: ReturnType<typeof loadContextConfig>;
   clearSessionCache: () => void;
@@ -119,7 +136,7 @@ export function prepareContextSessionForTurn(params: {
   }
 
   if (params.config.compaction.restartSessionAfterCompact) {
-    clearSession(params.groupFolder);
+    clearSession(params.sessionKey);
     params.clearSessionCache();
     return undefined;
   }
@@ -132,6 +149,7 @@ export async function recordCompletedContextTurn(params: {
   chatJid: string;
   source: AgentTaskSource;
   contextMode?: EventExecutionContextMode;
+  sessionKey?: string;
   userPrompt: string;
   assistantResponse: string | null;
   usage?: TurnUsage;
@@ -262,7 +280,9 @@ export async function recordCompletedContextTurn(params: {
   });
 
   if (config.compaction.restartSessionAfterCompact) {
-    clearSession(params.group.folder);
+    if (params.sessionKey) {
+      clearSession(params.sessionKey);
+    }
     params.clearSessionCache();
     params.closeWorker();
   }

@@ -9,6 +9,7 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
+  buildLiveSessionKey,
   buildPromptWithBootstrap,
   isContextSourceEnabled,
   prepareContextSessionForTurn,
@@ -94,21 +95,28 @@ export async function runSingleTurnAgentTask(
 
   const isMain = group.isMain === true;
   const sessions = deps.getSessions();
-  const existingSessionId =
-    request.contextMode === 'group' ? sessions[group.folder] : undefined;
   const contextParticipation = isContextSourceEnabled({
     source: request.source,
     contextMode: request.contextMode,
   });
+  const sessionKey = buildLiveSessionKey({
+    groupFolder: group.folder,
+    source: request.source,
+    contextMode: request.contextMode,
+  });
+  const existingSessionId = sessionKey ? sessions[sessionKey] : undefined;
   const sessionId = contextParticipation.enabled
-    ? prepareContextSessionForTurn({
-        groupFolder: group.folder,
-        sessionId: existingSessionId,
-        config: contextParticipation.config,
-        clearSessionCache: () => {
-          delete sessions[group.folder];
-        },
-      })
+    ? sessionKey
+      ? prepareContextSessionForTurn({
+          groupFolder: group.folder,
+          sessionKey,
+          sessionId: existingSessionId,
+          config: contextParticipation.config,
+          clearSessionCache: () => {
+            delete sessions[sessionKey];
+          },
+        })
+      : undefined
     : existingSessionId;
   const promptWithBootstrap = contextParticipation.enabled
     ? buildPromptWithBootstrap({
@@ -139,9 +147,9 @@ export async function runSingleTurnAgentTask(
     if (output.usage) {
       usage = output.usage;
     }
-    if (request.contextMode === 'group' && output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+    if (sessionKey && output.newSessionId) {
+      sessions[sessionKey] = output.newSessionId;
+      setSession(sessionKey, output.newSessionId);
     }
 
     if (output.result) {
@@ -189,9 +197,9 @@ export async function runSingleTurnAgentTask(
 
     if (closeTimer) clearTimeout(closeTimer);
 
-    if (request.contextMode === 'group' && output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+    if (sessionKey && output.newSessionId) {
+      sessions[sessionKey] = output.newSessionId;
+      setSession(sessionKey, output.newSessionId);
     }
 
     if (output.status === 'error') {
@@ -213,12 +221,15 @@ export async function runSingleTurnAgentTask(
       chatJid: request.chatJid,
       source: request.source,
       contextMode: request.contextMode,
+      sessionKey,
       userPrompt: request.prompt,
       assistantResponse: result,
       usage,
       closeWorker: () => deps.queue.closeStdin(request.chatJid),
       clearSessionCache: () => {
-        delete sessions[group.folder];
+        if (sessionKey) {
+          delete sessions[sessionKey];
+        }
       },
       invokeInternalPrompt: async (internalPrompt) =>
         runContainerAgent(

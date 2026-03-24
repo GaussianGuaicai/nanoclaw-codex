@@ -11,8 +11,11 @@ import {
   getMessagesSince,
   getNewMessages,
   getTaskById,
+  getAllSessions,
   insertContextTurn,
+  migrateLegacyLiveSessions,
   setRegisteredGroup,
+  setSession,
   storeChatMetadata,
   storeMessage,
   updateGroupMemoryState,
@@ -478,5 +481,30 @@ describe('registered group isMain', () => {
     const group = groups['group@g.us'];
     expect(group).toBeDefined();
     expect(group.isMain).toBeUndefined();
+  });
+});
+
+describe('live session migration', () => {
+  it('migrates legacy bare session keys to chat-scoped keys', () => {
+    setSession('slack_main', 'legacy-session');
+
+    const result = migrateLegacyLiveSessions();
+    const sessions = getAllSessions();
+
+    expect(result).toEqual({ migrated: 1, dropped: 0 });
+    expect(sessions['slack_main']).toBeUndefined();
+    expect(sessions['slack_main::chat']).toBe('legacy-session');
+  });
+
+  it('drops legacy bare session keys when a chat-scoped key already exists', () => {
+    setSession('slack_main', 'legacy-session');
+    setSession('slack_main::chat', 'scoped-session');
+
+    const result = migrateLegacyLiveSessions();
+    const sessions = getAllSessions();
+
+    expect(result).toEqual({ migrated: 0, dropped: 1 });
+    expect(sessions['slack_main']).toBeUndefined();
+    expect(sessions['slack_main::chat']).toBe('scoped-session');
   });
 });

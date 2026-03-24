@@ -19,6 +19,7 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
+  buildLiveSessionKey,
   buildPromptWithBootstrap,
   isContextSourceEnabled,
   prepareContextSessionForTurn,
@@ -279,17 +280,25 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (finalResponse) {
     const participation = isContextSourceEnabled({ source: 'chat' });
     if (participation.enabled) {
+      const sessionKey = buildLiveSessionKey({
+        groupFolder: group.folder,
+        source: 'chat',
+        contextMode: 'group',
+      });
       await recordCompletedContextTurn({
         group,
         chatJid,
         source: 'chat',
         contextMode: 'group',
+        sessionKey,
         userPrompt: contextUserPrompt,
         assistantResponse: finalResponse,
         usage: latestUsage ?? output.usage,
         closeWorker: () => queue.closeStdin(chatJid),
         clearSessionCache: () => {
-          delete sessions[group.folder];
+          if (sessionKey) {
+            delete sessions[sessionKey];
+          }
         },
         invokeInternalPrompt: async (internalPrompt) =>
           runContainerAgent(
@@ -326,16 +335,26 @@ async function runAgent(
 ): Promise<ContainerOutput> {
   const isMain = group.isMain === true;
   const participation = isContextSourceEnabled({ source: 'chat' });
+  const sessionKey = buildLiveSessionKey({
+    groupFolder: group.folder,
+    source: 'chat',
+    contextMode: 'group',
+  });
   const sessionId = participation.enabled
-    ? prepareContextSessionForTurn({
-        groupFolder: group.folder,
-        sessionId: sessions[group.folder],
-        config: participation.config,
-        clearSessionCache: () => {
-          delete sessions[group.folder];
-        },
-      })
-    : sessions[group.folder];
+    ? sessionKey
+      ? prepareContextSessionForTurn({
+          groupFolder: group.folder,
+          sessionKey,
+          sessionId: sessions[sessionKey],
+          config: participation.config,
+          clearSessionCache: () => {
+            delete sessions[sessionKey];
+          },
+        })
+      : undefined
+    : sessionKey
+      ? sessions[sessionKey]
+      : undefined;
   const promptWithBootstrap = participation.enabled
     ? buildPromptWithBootstrap({
         groupFolder: group.folder,
@@ -373,9 +392,9 @@ async function runAgent(
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
-        if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+        if (sessionKey && output.newSessionId) {
+          sessions[sessionKey] = output.newSessionId;
+          setSession(sessionKey, output.newSessionId);
         }
         await onOutput(output);
       }
@@ -418,9 +437,9 @@ async function runAgent(
       wrappedOnOutput,
     );
 
-    if (output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+    if (sessionKey && output.newSessionId) {
+      sessions[sessionKey] = output.newSessionId;
+      setSession(sessionKey, output.newSessionId);
     }
 
     if (output.status === 'error') {

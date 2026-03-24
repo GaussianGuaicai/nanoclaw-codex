@@ -23,6 +23,7 @@ import {
   listContextTurnsForGroup,
 } from './db.js';
 import {
+  buildLiveSessionKey,
   isContextSourceEnabled,
   prepareContextSessionForTurn,
   recordCompletedContextTurn,
@@ -115,6 +116,31 @@ describe('isContextSourceEnabled', () => {
   });
 });
 
+describe('buildLiveSessionKey', () => {
+  it('scopes chat and group event sessions separately', () => {
+    expect(
+      buildLiveSessionKey({
+        groupFolder: 'slack_main',
+        source: 'chat',
+      }),
+    ).toBe('slack_main::chat');
+    expect(
+      buildLiveSessionKey({
+        groupFolder: 'slack_main',
+        source: 'websocket',
+        contextMode: 'group',
+      }),
+    ).toBe('slack_main::websocket');
+    expect(
+      buildLiveSessionKey({
+        groupFolder: 'slack_main',
+        source: 'scheduled',
+        contextMode: 'isolated',
+      }),
+    ).toBeUndefined();
+  });
+});
+
 describe('recordCompletedContextTurn', () => {
   afterEach(() => {
     _initTestDatabase();
@@ -155,6 +181,7 @@ describe('recordCompletedContextTurn', () => {
       chatJid: 'slack:C0AL00L1C7J',
       source: 'chat',
       contextMode: 'group',
+      sessionKey: 'slack_main::chat',
       userPrompt: 'What tools do you have?',
       assistantResponse: 'I can inspect files, run commands, and help debug.',
       usage: {
@@ -211,6 +238,7 @@ describe('recordCompletedContextTurn', () => {
       chatJid: 'slack:C0AL00L1C7J',
       source: 'websocket',
       contextMode: 'group',
+      sessionKey: 'slack_main::websocket',
       userPrompt: 'User prompt one.',
       assistantResponse: 'Assistant response one.',
       usage: {
@@ -227,6 +255,7 @@ describe('recordCompletedContextTurn', () => {
       chatJid: 'slack:C0AL00L1C7J',
       source: 'websocket',
       contextMode: 'group',
+      sessionKey: 'slack_main::websocket',
       userPrompt: 'User prompt two.',
       assistantResponse: 'Assistant response two.',
       usage: {
@@ -281,6 +310,7 @@ describe('prepareContextSessionForTurn', () => {
 
     const sessionId = prepareContextSessionForTurn({
       groupFolder: testGroup.folder,
+      sessionKey: 'slack_main::chat',
       sessionId: 'existing-session',
       config: baseConfig,
       clearSessionCache,

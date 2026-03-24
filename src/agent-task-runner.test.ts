@@ -30,6 +30,9 @@ const {
         },
       },
     })),
+    prepareContextSessionForTurn: vi.fn(
+      (params: { sessionId?: string }) => params.sessionId,
+    ),
     buildPromptWithBootstrap: vi.fn(
       (params: { prompt: string }) => params.prompt,
     ),
@@ -225,5 +228,77 @@ describe('runSingleTurnAgentTask', () => {
       }),
     );
     expect(setSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('clears an oversized existing session before building the next prompt', async () => {
+    contextRuntimeMock.isContextSourceEnabled.mockReturnValueOnce({
+      enabled: true,
+      config: {
+        enabled: true,
+        summaryMemory: {
+          enabled: true,
+          model: 'gpt-5.4-mini',
+          reasoningEffort: 'low',
+          updateMinTurns: 2,
+          maxItemsPerList: 12,
+        },
+        compaction: {
+          enabled: true,
+          strategy: 'sliding-window',
+          trigger: {
+            lastInputTokensGte: 45000,
+            fallbackEstimatedTokensGte: 38000,
+          },
+          window: {
+            keepRecentTurns: 24,
+            keepRecentEstimatedTokens: 12000,
+          },
+          restartSessionAfterCompact: true,
+        },
+      },
+    });
+    contextRuntimeMock.prepareContextSessionForTurn.mockReturnValueOnce(
+      undefined,
+    );
+    runContainerAgentMock.mockResolvedValue({
+      status: 'success',
+      result: 'ok',
+      newSessionId: 'fresh-session',
+    });
+
+    const sessions: Record<string, string> = { team: 'oversized-session' };
+
+    await runSingleTurnAgentTask(
+      { folder: 'team', isMain: false } as any,
+      {
+        chatJid: 'chat@g.us',
+        prompt: 'ping',
+        contextMode: 'group',
+        source: 'scheduled',
+      },
+      {
+        getSessions: () => sessions,
+        onProcess: () => {},
+        queue: {
+          closeStdin: vi.fn(),
+          notifyIdle: vi.fn(),
+        } as any,
+      },
+    );
+
+    expect(
+      contextRuntimeMock.prepareContextSessionForTurn,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupFolder: 'team',
+        sessionId: 'oversized-session',
+      }),
+    );
+    expect(contextRuntimeMock.buildPromptWithBootstrap).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: undefined,
+      }),
+    );
+    expect(sessions.team).toBe('fresh-session');
   });
 });

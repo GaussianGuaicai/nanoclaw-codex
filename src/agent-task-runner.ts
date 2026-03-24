@@ -11,6 +11,7 @@ import {
 import {
   buildPromptWithBootstrap,
   isContextSourceEnabled,
+  prepareContextSessionForTurn,
   recordCompletedContextTurn,
 } from './context-runtime.js';
 import { GroupQueue } from './group-queue.js';
@@ -93,12 +94,22 @@ export async function runSingleTurnAgentTask(
 
   const isMain = group.isMain === true;
   const sessions = deps.getSessions();
-  const sessionId =
+  const existingSessionId =
     request.contextMode === 'group' ? sessions[group.folder] : undefined;
   const contextParticipation = isContextSourceEnabled({
     source: request.source,
     contextMode: request.contextMode,
   });
+  const sessionId = contextParticipation.enabled
+    ? prepareContextSessionForTurn({
+        groupFolder: group.folder,
+        sessionId: existingSessionId,
+        config: contextParticipation.config,
+        clearSessionCache: () => {
+          delete sessions[group.folder];
+        },
+      })
+    : existingSessionId;
   const promptWithBootstrap = contextParticipation.enabled
     ? buildPromptWithBootstrap({
         groupFolder: group.folder,

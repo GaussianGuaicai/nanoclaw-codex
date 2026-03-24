@@ -21,6 +21,7 @@ import {
 import {
   buildPromptWithBootstrap,
   isContextSourceEnabled,
+  prepareContextSessionForTurn,
   recordCompletedContextTurn,
 } from './context-runtime.js';
 import {
@@ -324,8 +325,17 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<ContainerOutput> {
   const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
   const participation = isContextSourceEnabled({ source: 'chat' });
+  const sessionId = participation.enabled
+    ? prepareContextSessionForTurn({
+        groupFolder: group.folder,
+        sessionId: sessions[group.folder],
+        config: participation.config,
+        clearSessionCache: () => {
+          delete sessions[group.folder];
+        },
+      })
+    : sessions[group.folder];
   const promptWithBootstrap = participation.enabled
     ? buildPromptWithBootstrap({
         groupFolder: group.folder,

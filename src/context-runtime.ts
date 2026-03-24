@@ -76,6 +76,57 @@ export function buildPromptWithBootstrap(params: {
   });
 }
 
+export function prepareContextSessionForTurn(params: {
+  groupFolder: string;
+  sessionId?: string;
+  config: ReturnType<typeof loadContextConfig>;
+  clearSessionCache: () => void;
+}): string | undefined {
+  const existingSessionId = params.sessionId?.trim();
+  if (!existingSessionId) {
+    return undefined;
+  }
+
+  if (!params.config.compaction.enabled) {
+    return existingSessionId;
+  }
+
+  const memoryState = getOrCreateGroupMemoryState(params.groupFolder);
+  const activeTurns = getContextTurnsAfterId(
+    params.groupFolder,
+    memoryState.last_compacted_turn_id,
+  );
+  const decision = shouldCompactContext({
+    config: params.config.compaction,
+    memoryState,
+    activeTurns,
+  });
+
+  if (!decision.shouldCompact) {
+    return existingSessionId;
+  }
+
+  const newBoundary = computeSlidingWindowBoundary({
+    activeTurns,
+    window: params.config.compaction.window,
+  });
+
+  if (newBoundary > memoryState.last_compacted_turn_id) {
+    updateGroupMemoryState(params.groupFolder, {
+      last_compacted_turn_id: newBoundary,
+      last_compaction_at: new Date().toISOString(),
+    });
+  }
+
+  if (params.config.compaction.restartSessionAfterCompact) {
+    clearSession(params.groupFolder);
+    params.clearSessionCache();
+    return undefined;
+  }
+
+  return existingSessionId;
+}
+
 export async function recordCompletedContextTurn(params: {
   group: RegisteredGroup;
   chatJid: string;

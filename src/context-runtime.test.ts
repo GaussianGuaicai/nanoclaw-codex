@@ -24,6 +24,7 @@ import {
 } from './db.js';
 import {
   isContextSourceEnabled,
+  prepareContextSessionForTurn,
   recordCompletedContextTurn,
 } from './context-runtime.js';
 import { RegisteredGroup } from './types.js';
@@ -246,6 +247,46 @@ describe('recordCompletedContextTurn', () => {
     expect(state.last_compaction_at).toBeTruthy();
     expect(state.last_summarized_turn_id).toBe(0);
     expect(closeWorker).toHaveBeenCalledTimes(1);
+    expect(clearSessionCache).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('prepareContextSessionForTurn', () => {
+  afterEach(() => {
+    _initTestDatabase();
+    vi.clearAllMocks();
+  });
+
+  it('clears an existing session before the next turn when the previous turn already exceeded compaction limits', async () => {
+    loadContextConfigMock.mockReturnValue(baseConfig);
+
+    const clearSessionCache = vi.fn();
+    const invokeInternalPrompt = vi.fn();
+
+    await recordCompletedContextTurn({
+      group: testGroup,
+      chatJid: 'slack:C0AL00L1C7J',
+      source: 'chat',
+      contextMode: 'group',
+      userPrompt: 'A short prompt.',
+      assistantResponse: 'A short response.',
+      usage: {
+        inputTokens: 60000,
+        outputTokens: 200,
+      },
+      closeWorker: vi.fn(),
+      clearSessionCache: vi.fn(),
+      invokeInternalPrompt,
+    });
+
+    const sessionId = prepareContextSessionForTurn({
+      groupFolder: testGroup.folder,
+      sessionId: 'existing-session',
+      config: baseConfig,
+      clearSessionCache,
+    });
+
+    expect(sessionId).toBeUndefined();
     expect(clearSessionCache).toHaveBeenCalledTimes(1);
   });
 });

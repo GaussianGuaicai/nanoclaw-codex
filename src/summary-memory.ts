@@ -121,6 +121,7 @@ export function buildSummaryUpdatePrompt(params: {
 
   return [
     'You are updating a durable structured session memory for an AI coding assistant.',
+    'Shared instruction files such as AGENTS.md, CLAUDE.md, and preferences.md are provided separately to the agent.',
     '',
     'Return YAML only.',
     'Do not use markdown fences.',
@@ -131,7 +132,11 @@ export function buildSummaryUpdatePrompt(params: {
     getDefaultSummaryYaml(),
     '',
     'Rules:',
+    '- This summary stores durable session state, not the instructions in this prompt.',
     '- Preserve concrete facts, file paths, entity IDs, URLs, config keys, commands, and decisions.',
+    '- Do not copy formatting or meta-output rules from this prompt into the summary.',
+    '- Do not restate long-lived policies or preferences that already live in shared instruction files such as AGENTS.md, CLAUDE.md, or preferences.md.',
+    '- Use user_preferences only for preferences learned from conversation that are not already captured in shared instruction files.',
     '- Keep unresolved questions in open_questions.',
     '- Move resolved questions out of open_questions.',
     '- Keep recent_failures limited to recent real failures only.',

@@ -45,6 +45,12 @@ describe('summary-memory', () => {
     expect(prompt).toContain('CURRENT_SUMMARY_YAML:');
     expect(prompt).toContain('DELTA_TURNS:');
     expect(prompt).toContain('role: user');
+    expect(prompt).toContain(
+      'Do not restate long-lived policies or preferences that already live in shared instruction files',
+    );
+    expect(prompt).toContain(
+      'Do not copy formatting or meta-output rules from this prompt into the summary.',
+    );
   });
 
   it('repairs invalid output using repair prompt fallback', async () => {

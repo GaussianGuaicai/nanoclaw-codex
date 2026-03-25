@@ -68,11 +68,18 @@ export function buildPromptWithBootstrap(params: {
     params.groupFolder,
     memoryState.last_compacted_turn_id,
   );
+  const historyScope =
+    params.source === 'chat' ? ('shared' as const) : ('source-only' as const);
+  const scopedRecentTurns =
+    historyScope === 'shared'
+      ? recentTurns
+      : recentTurns.filter((turn) => turn.source === params.source);
   return buildContextBootstrapPrompt({
     summaryYaml: memoryState.summary_yaml,
-    recentTurns,
+    recentTurns: scopedRecentTurns,
     currentInput: params.prompt,
     currentSource: params.source,
+    historyScope,
   });
 }
 

@@ -19,11 +19,13 @@ vi.mock('./summary-memory.js', async (importOriginal) => {
 
 import {
   _initTestDatabase,
+  insertContextTurn,
   getOrCreateGroupMemoryState,
   listContextTurnsForGroup,
 } from './db.js';
 import {
   buildLiveSessionKey,
+  buildPromptWithBootstrap,
   isContextSourceEnabled,
   prepareContextSessionForTurn,
   recordCompletedContextTurn,
@@ -138,6 +140,80 @@ describe('buildLiveSessionKey', () => {
         contextMode: 'isolated',
       }),
     ).toBeUndefined();
+  });
+});
+
+describe('buildPromptWithBootstrap', () => {
+  afterEach(() => {
+    _initTestDatabase();
+    vi.clearAllMocks();
+  });
+
+  it('limits non-chat bootstrap history to the current source and adds source-scoped guidance', () => {
+    loadContextConfigMock.mockReturnValue(baseConfig);
+
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'chat:test-room',
+      source: 'chat',
+      role: 'user',
+      content: 'Chat asked about recent device events.',
+      created_at: '2026-03-25T13:57:11.000Z',
+      est_tokens: 10,
+    });
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'chat:test-room',
+      source: 'scheduled',
+      role: 'user',
+      content: 'Scheduled task should run the target action.',
+      created_at: '2026-03-25T14:00:34.000Z',
+      est_tokens: 10,
+    });
+
+    const prompt = buildPromptWithBootstrap({
+      groupFolder: testGroup.folder,
+      source: 'scheduled',
+      prompt: 'Run the scheduled task now.',
+    });
+
+    expect(prompt).toContain('CURRENT_INPUT is the task to execute now');
+    expect(prompt).toContain('source `scheduled`');
+    expect(prompt).toContain('Scheduled task should run the target action.');
+    expect(prompt).not.toContain('Chat asked about recent device events.');
+  });
+
+  it('keeps shared recent turns for chat bootstrap', () => {
+    loadContextConfigMock.mockReturnValue(baseConfig);
+
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'chat:test-room',
+      source: 'chat',
+      role: 'user',
+      content: 'Chat asked about recent device events.',
+      created_at: '2026-03-25T13:57:11.000Z',
+      est_tokens: 10,
+    });
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'chat:test-room',
+      source: 'websocket',
+      role: 'assistant',
+      content: 'Realtime event was notify-only.',
+      created_at: '2026-03-25T14:26:46.000Z',
+      est_tokens: 10,
+    });
+
+    const prompt = buildPromptWithBootstrap({
+      groupFolder: testGroup.folder,
+      source: 'chat',
+      prompt: 'Answer the user.',
+    });
+
+    expect(prompt).toContain('may include multiple sources');
+    expect(prompt).toContain('Chat asked about recent device events.');
+    expect(prompt).toContain('Realtime event was notify-only.');
   });
 });
 

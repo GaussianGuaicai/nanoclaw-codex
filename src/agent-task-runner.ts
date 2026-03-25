@@ -56,6 +56,21 @@ export interface AgentTaskResult {
   usage?: TurnUsage;
 }
 
+const SCHEDULED_AUTO_REPLY_CONTRACT = [
+  'Channel reply requirements:',
+  '- Decide whether this run needs a user-facing reply.',
+  '- If the user should be informed, send a concise user-facing update suitable for the target channel.',
+  '- If the task completed successfully but nothing needs to be surfaced now, return only <internal>...</internal> content.',
+].join('\n');
+
+function buildTaskPrompt(request: AgentTaskRequest): string {
+  if (request.source === 'scheduled' && request.deliverOutput) {
+    return `${SCHEDULED_AUTO_REPLY_CONTRACT}\n\n${request.prompt}`;
+  }
+
+  return request.prompt;
+}
+
 function writeTaskSnapshot(group: RegisteredGroup): void {
   const isMain = group.isMain === true;
   const tasks = getAllTasks();
@@ -122,10 +137,10 @@ export async function runSingleTurnAgentTask(
     ? buildPromptWithBootstrap({
         groupFolder: group.folder,
         source: request.source,
-        prompt: request.prompt,
+        prompt: buildTaskPrompt(request),
         sessionId,
       })
-    : request.prompt;
+    : buildTaskPrompt(request);
 
   writeTaskSnapshot(group);
 

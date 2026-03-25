@@ -324,4 +324,41 @@ describe('runSingleTurnAgentTask', () => {
     );
     expect(sessions['team::scheduled']).toBe('fresh-session');
   });
+
+  it('adds conditional reply guidance to scheduled prompts when output delivery is enabled', async () => {
+    runContainerAgentMock.mockResolvedValue({
+      status: 'success',
+      result: '<internal>done</internal>',
+    });
+
+    await runSingleTurnAgentTask(
+      { folder: 'team', isMain: false } as any,
+      {
+        chatJid: 'chat@g.us',
+        prompt: 'Check the task and notify only if needed.',
+        contextMode: 'isolated',
+        source: 'scheduled',
+        deliverOutput: true,
+      },
+      {
+        getSessions: () => ({}),
+        onProcess: () => {},
+        queue: {
+          closeStdin: vi.fn(),
+          notifyIdle: vi.fn(),
+        } as any,
+      },
+    );
+
+    expect(runContainerAgentMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        prompt: expect.stringContaining(
+          'If the task completed successfully but nothing needs to be surfaced now',
+        ),
+      }),
+      expect.any(Function),
+      expect.any(Function),
+    );
+  });
 });

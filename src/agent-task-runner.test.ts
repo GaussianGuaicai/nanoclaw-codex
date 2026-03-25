@@ -18,7 +18,11 @@ const {
   })) as any,
   contextRuntimeMock: {
     buildLiveSessionKey: vi.fn(
-      (params: { groupFolder: string; source: string; contextMode?: string }) =>
+      (params: {
+        groupFolder: string;
+        source: string;
+        contextMode?: string;
+      }) =>
         params.source === 'chat'
           ? `${params.groupFolder}::chat`
           : params.contextMode === 'group'

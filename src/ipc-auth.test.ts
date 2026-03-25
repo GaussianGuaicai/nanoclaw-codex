@@ -680,6 +680,45 @@ describe('schedule_task context_mode', () => {
       reasoningEffort: 'low',
     });
   });
+
+  it('defaults scheduled task deliver_output to true', async () => {
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'default delivery',
+        schedule_type: 'once',
+        schedule_value: '2025-06-01T00:00:00.000Z',
+        targetJid: 'other@g.us',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    const tasks = getAllTasks();
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].deliver_output).toBe(true);
+  });
+
+  it('persists explicit deliver_output false on scheduled task', async () => {
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'silent schedule',
+        schedule_type: 'once',
+        schedule_value: '2025-06-01T00:00:00.000Z',
+        targetJid: 'other@g.us',
+        deliver_output: false,
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    const tasks = getAllTasks();
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].deliver_output).toBe(false);
+  });
 });
 
 // --- register_group success path ---

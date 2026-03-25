@@ -132,7 +132,7 @@ async function runTask(
       contextMode: task.context_mode,
       source: 'scheduled',
       agentConfigOverride: task.agent_config,
-      deliverOutput: true,
+      deliverOutput: task.deliver_output !== false,
       isScheduledTask: true,
       assistantName: ASSISTANT_NAME,
     },

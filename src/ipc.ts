@@ -162,6 +162,7 @@ export async function processTaskIpc(
     schedule_type?: string;
     schedule_value?: string;
     context_mode?: string;
+    deliver_output?: boolean;
     agent_config?: unknown;
     groupFolder?: string;
     chatJid?: string;
@@ -256,6 +257,8 @@ export async function processTaskIpc(
           data.context_mode === 'group' || data.context_mode === 'isolated'
             ? data.context_mode
             : 'isolated';
+        const deliverOutput =
+          typeof data.deliver_output === 'boolean' ? data.deliver_output : true;
         const parsedAgentConfig = agentExecutionConfigSchema.safeParse(
           data.agent_config,
         );
@@ -281,6 +284,7 @@ export async function processTaskIpc(
           schedule_type: scheduleType,
           schedule_value: data.schedule_value,
           context_mode: contextMode,
+          deliver_output: deliverOutput,
           agent_config: parsedAgentConfig.success
             ? parsedAgentConfig.data
             : undefined,
@@ -289,7 +293,7 @@ export async function processTaskIpc(
           created_at: new Date().toISOString(),
         });
         logger.info(
-          { taskId, sourceGroup, targetFolder, contextMode },
+          { taskId, sourceGroup, targetFolder, contextMode, deliverOutput },
           'Task created via IPC',
         );
       }

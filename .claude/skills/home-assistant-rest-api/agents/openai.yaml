@@ -1,0 +1,4 @@
+interface:
+  display_name: "Home Assistant REST API"
+  short_description: "Quick Home Assistant REST workflows"
+  default_prompt: "Use $home-assistant-rest-api to inspect Home Assistant states, call services, and debug REST requests."

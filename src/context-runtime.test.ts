@@ -22,6 +22,7 @@ import {
   insertContextTurn,
   getOrCreateGroupMemoryState,
   listContextTurnsForGroup,
+  updateGroupMemoryState,
 } from './db.js';
 import {
   buildLiveSessionKey,
@@ -362,7 +363,7 @@ describe('prepareContextSessionForTurn', () => {
     vi.clearAllMocks();
   });
 
-  it('clears an existing session before the next turn when the previous turn already exceeded compaction limits', async () => {
+  it('does not clear an existing session when compaction triggers but boundary does not advance', async () => {
     loadContextConfigMock.mockReturnValue(baseConfig);
 
     const clearSessionCache = vi.fn();
@@ -389,6 +390,76 @@ describe('prepareContextSessionForTurn', () => {
       sessionKey: 'slack_main::chat',
       sessionId: 'existing-session',
       config: baseConfig,
+      clearSessionCache,
+    });
+
+    expect(sessionId).toBe('existing-session');
+    expect(clearSessionCache).not.toHaveBeenCalled();
+  });
+
+  it('clears an existing session only when compaction advances the boundary', () => {
+    loadContextConfigMock.mockReturnValue(baseConfig);
+
+    const clearSessionCache = vi.fn();
+    const config = {
+      ...baseConfig,
+      compaction: {
+        ...baseConfig.compaction,
+        window: {
+          keepRecentTurns: 1,
+          keepRecentEstimatedTokens: 10,
+        },
+      },
+    };
+
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'slack:C0AL00L1C7J',
+      source: 'chat',
+      role: 'user',
+      content: 'turn-1',
+      created_at: '2026-03-22T00:00:00.000Z',
+      est_tokens: 10,
+      actual_input_tokens: null,
+      actual_output_tokens: null,
+      batch_id: null,
+      metadata_json: null,
+    });
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'slack:C0AL00L1C7J',
+      source: 'chat',
+      role: 'assistant',
+      content: 'turn-2',
+      created_at: '2026-03-22T00:00:01.000Z',
+      est_tokens: 10,
+      actual_input_tokens: null,
+      actual_output_tokens: null,
+      batch_id: null,
+      metadata_json: null,
+    });
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'slack:C0AL00L1C7J',
+      source: 'chat',
+      role: 'user',
+      content: 'turn-3',
+      created_at: '2026-03-22T00:00:02.000Z',
+      est_tokens: 10,
+      actual_input_tokens: null,
+      actual_output_tokens: null,
+      batch_id: null,
+      metadata_json: null,
+    });
+    updateGroupMemoryState(testGroup.folder, {
+      last_input_tokens: 60000,
+    });
+
+    const sessionId = prepareContextSessionForTurn({
+      groupFolder: testGroup.folder,
+      sessionKey: 'slack_main::chat',
+      sessionId: 'existing-session',
+      config,
       clearSessionCache,
     });
 

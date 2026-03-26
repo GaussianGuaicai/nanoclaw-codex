@@ -135,12 +135,14 @@ export function prepareContextSessionForTurn(params: {
     window: params.config.compaction.window,
   });
 
-  if (newBoundary > memoryState.last_compacted_turn_id) {
-    updateGroupMemoryState(params.groupFolder, {
-      last_compacted_turn_id: newBoundary,
-      last_compaction_at: new Date().toISOString(),
-    });
+  if (newBoundary <= memoryState.last_compacted_turn_id) {
+    return existingSessionId;
   }
+
+  updateGroupMemoryState(params.groupFolder, {
+    last_compacted_turn_id: newBoundary,
+    last_compaction_at: new Date().toISOString(),
+  });
 
   if (params.config.compaction.restartSessionAfterCompact) {
     clearSession(params.sessionKey);

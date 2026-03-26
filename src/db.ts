@@ -201,6 +201,9 @@ export function initDatabase(): void {
 
   db = new Database(dbPath);
   createSchema(db);
+  // Migrate from JSON files if they exist
+  migrateJsonState();
+
   const sessionMigration = migrateLegacyLiveSessions();
   if (sessionMigration.migrated > 0 || sessionMigration.dropped > 0) {
     logger.info(
@@ -211,9 +214,6 @@ export function initDatabase(): void {
       'Migrated legacy live session keys',
     );
   }
-
-  // Migrate from JSON files if they exist
-  migrateJsonState();
 }
 
 /** @internal - for tests only. Creates a fresh in-memory database. */

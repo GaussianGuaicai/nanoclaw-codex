@@ -493,6 +493,8 @@ export class CodexRuntime implements AgentRuntime {
     let pollTimer: NodeJS.Timeout | null = null;
     let closedDuringQuery = false;
     let nextPrompt: string | undefined;
+    let nextPromptBackgroundOnly = false;
+    let queuedBackgroundPrompt: string | undefined;
 
     const stopIpcPolling = () => {
       ipcPolling = false;
@@ -515,12 +517,39 @@ export class CodexRuntime implements AgentRuntime {
 
       const messages = this.ipc.drainIpcInput();
       if (messages.length > 0) {
-        nextPrompt = messages.join('\n');
-        this.hooks.onLog(
-          `Received ${messages.length} IPC message(s) during Codex query; interrupting turn`,
+        const backgroundMessages = messages.filter(
+          (message) => message.type === 'background_activity',
         );
-        stopIpcPolling();
-        abortController.abort();
+        const regularMessages = messages.filter(
+          (message) => message.type === 'message',
+        );
+
+        if (backgroundMessages.length > 0) {
+          const backgroundPrompt = backgroundMessages
+            .map((message) => message.text)
+            .join('\n');
+          queuedBackgroundPrompt = queuedBackgroundPrompt
+            ? `${queuedBackgroundPrompt}\n${backgroundPrompt}`
+            : backgroundPrompt;
+          this.hooks.onLog(
+            `Queued ${backgroundMessages.length} background IPC update(s) for the next turn`,
+          );
+        }
+
+        if (regularMessages.length > 0) {
+          nextPrompt = [
+            queuedBackgroundPrompt,
+            regularMessages.map((message) => message.text).join('\n'),
+          ]
+            .filter(Boolean)
+            .join('\n');
+          nextPromptBackgroundOnly = false;
+          this.hooks.onLog(
+            `Received ${regularMessages.length} IPC message(s) during Codex query; interrupting turn`,
+          );
+          stopIpcPolling();
+          abortController.abort();
+        }
         return;
       }
 
@@ -590,11 +619,26 @@ export class CodexRuntime implements AgentRuntime {
         lastAssistantUuid: undefined,
         closedDuringQuery: false,
         nextPrompt,
+        nextPromptBackgroundOnly,
         usage,
       };
     }
 
-    if (containerInput.suppressConversationArchive !== true) {
+    if (queuedBackgroundPrompt != null) {
+      return {
+        newSessionId: newSessionId || undefined,
+        lastAssistantUuid: undefined,
+        closedDuringQuery: false,
+        nextPrompt: queuedBackgroundPrompt,
+        nextPromptBackgroundOnly: true,
+        usage,
+      };
+    }
+
+    if (
+      containerInput.suppressConversationArchive !== true &&
+      input.backgroundOnly !== true
+    ) {
       archiveCodexTurn(
         prompt,
         finalText,
@@ -603,7 +647,9 @@ export class CodexRuntime implements AgentRuntime {
         containerInput.taskSource,
       );
     }
-    this.hooks.onResult(finalText || null, newSessionId || undefined, usage);
+    if (input.backgroundOnly !== true) {
+      this.hooks.onResult(finalText || null, newSessionId || undefined, usage);
+    }
 
     return {
       newSessionId: newSessionId || undefined,

@@ -155,8 +155,8 @@ describe('CodexRuntime IPC interruption', () => {
     const onLog = vi.fn();
     const onResult = vi.fn();
     const drainIpcInput = vi
-      .fn<() => string[]>()
-      .mockReturnValueOnce(['follow up']);
+      .fn<() => Array<{ type: 'message'; text: string }>>()
+      .mockReturnValueOnce([{ type: 'message', text: 'follow up' }]);
 
     const runtime = new CodexRuntime(
       { onLog, onResult },

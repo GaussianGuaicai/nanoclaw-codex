@@ -5,6 +5,7 @@ export function buildContextBootstrapPrompt(params: {
   recentTurns: ContextTurn[];
   currentInput: string;
   currentSource: string;
+  historyScope: 'shared' | 'source-only';
 }): string {
   const recentTurnsBlock =
     params.recentTurns.length > 0
@@ -23,6 +24,13 @@ export function buildContextBootstrapPrompt(params: {
 
   return [
     'CONTEXT_BUNDLE',
+    '',
+    'CONTEXT_RULES:',
+    '- CURRENT_INPUT is the task to execute now and overrides stale task framing elsewhere in this bundle.',
+    '- Use STRUCTURED_SUMMARY_YAML for stable preferences, entities, and past failures, not as the authoritative current task when it conflicts with CURRENT_INPUT.',
+    params.historyScope === 'source-only'
+      ? `- RECENT_TURNS below are limited to source \`${params.currentSource}\` to avoid cross-source contamination.`
+      : '- RECENT_TURNS below may include multiple sources from the same group when relevant.',
     '',
     'STRUCTURED_SUMMARY_YAML:',
     params.summaryYaml.trim(),

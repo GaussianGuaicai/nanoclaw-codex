@@ -17,6 +17,18 @@ const {
     config: { model: 'gpt-5-codex' },
   })) as any,
   contextRuntimeMock: {
+    buildLiveSessionKey: vi.fn(
+      (params: {
+        groupFolder: string;
+        source: string;
+        contextMode?: string;
+      }) =>
+        params.source === 'chat'
+          ? `${params.groupFolder}::chat`
+          : params.contextMode === 'group'
+            ? `${params.groupFolder}::${params.source}`
+            : undefined,
+    ),
     isContextSourceEnabled: vi.fn(() => ({
       enabled: false,
       config: {
@@ -30,6 +42,9 @@ const {
         },
       },
     })),
+    prepareContextSessionForTurn: vi.fn(
+      (params: { sessionId?: string }) => params.sessionId,
+    ),
     buildPromptWithBootstrap: vi.fn(
       (params: { prompt: string }) => params.prompt,
     ),
@@ -69,7 +84,9 @@ describe('runSingleTurnAgentTask', () => {
       newSessionId: 'isolated-session',
     });
 
-    const sessions: Record<string, string> = { team: 'existing-session' };
+    const sessions: Record<string, string> = {
+      'team::scheduled': 'existing-session',
+    };
 
     const result = await runSingleTurnAgentTask(
       { folder: 'team', isMain: false } as any,
@@ -90,7 +107,7 @@ describe('runSingleTurnAgentTask', () => {
     );
 
     expect(result.status).toBe('success');
-    expect(sessions.team).toBe('existing-session');
+    expect(sessions['team::scheduled']).toBe('existing-session');
     expect(setSessionMock).not.toHaveBeenCalled();
   });
 
@@ -111,7 +128,9 @@ describe('runSingleTurnAgentTask', () => {
       },
     );
 
-    const sessions: Record<string, string> = { team: 'existing-session' };
+    const sessions: Record<string, string> = {
+      'team::scheduled': 'existing-session',
+    };
 
     await runSingleTurnAgentTask(
       { folder: 'team', isMain: false } as any,
@@ -131,14 +150,18 @@ describe('runSingleTurnAgentTask', () => {
       },
     );
 
-    expect(sessions.team).toBe('final-session');
+    expect(sessions['team::scheduled']).toBe('final-session');
     expect(setSessionMock).toHaveBeenCalledTimes(2);
     expect(setSessionMock).toHaveBeenNthCalledWith(
       1,
-      'team',
+      'team::scheduled',
       'streamed-session',
     );
-    expect(setSessionMock).toHaveBeenNthCalledWith(2, 'team', 'final-session');
+    expect(setSessionMock).toHaveBeenNthCalledWith(
+      2,
+      'team::scheduled',
+      'final-session',
+    );
   });
 
   it('fails fast when resolved agent config is invalid', async () => {
@@ -225,5 +248,117 @@ describe('runSingleTurnAgentTask', () => {
       }),
     );
     expect(setSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('clears an oversized existing session before building the next prompt', async () => {
+    contextRuntimeMock.isContextSourceEnabled.mockReturnValueOnce({
+      enabled: true,
+      config: {
+        enabled: true,
+        summaryMemory: {
+          enabled: true,
+          model: 'gpt-5.4-mini',
+          reasoningEffort: 'low',
+          updateMinTurns: 2,
+          maxItemsPerList: 12,
+        },
+        compaction: {
+          enabled: true,
+          strategy: 'sliding-window',
+          trigger: {
+            lastInputTokensGte: 45000,
+            fallbackEstimatedTokensGte: 38000,
+          },
+          window: {
+            keepRecentTurns: 24,
+            keepRecentEstimatedTokens: 12000,
+          },
+          restartSessionAfterCompact: true,
+        },
+      },
+    });
+    contextRuntimeMock.prepareContextSessionForTurn.mockReturnValueOnce(
+      undefined,
+    );
+    runContainerAgentMock.mockResolvedValue({
+      status: 'success',
+      result: 'ok',
+      newSessionId: 'fresh-session',
+    });
+
+    const sessions: Record<string, string> = {
+      'team::scheduled': 'oversized-session',
+    };
+
+    await runSingleTurnAgentTask(
+      { folder: 'team', isMain: false } as any,
+      {
+        chatJid: 'chat@g.us',
+        prompt: 'ping',
+        contextMode: 'group',
+        source: 'scheduled',
+      },
+      {
+        getSessions: () => sessions,
+        onProcess: () => {},
+        queue: {
+          closeStdin: vi.fn(),
+          notifyIdle: vi.fn(),
+        } as any,
+      },
+    );
+
+    expect(
+      contextRuntimeMock.prepareContextSessionForTurn,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupFolder: 'team',
+        sessionKey: 'team::scheduled',
+        sessionId: 'oversized-session',
+      }),
+    );
+    expect(contextRuntimeMock.buildPromptWithBootstrap).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: undefined,
+      }),
+    );
+    expect(sessions['team::scheduled']).toBe('fresh-session');
+  });
+
+  it('adds conditional reply guidance to scheduled prompts when output delivery is enabled', async () => {
+    runContainerAgentMock.mockResolvedValue({
+      status: 'success',
+      result: '<internal>done</internal>',
+    });
+
+    await runSingleTurnAgentTask(
+      { folder: 'team', isMain: false } as any,
+      {
+        chatJid: 'chat@g.us',
+        prompt: 'Check the task and notify only if needed.',
+        contextMode: 'isolated',
+        source: 'scheduled',
+        deliverOutput: true,
+      },
+      {
+        getSessions: () => ({}),
+        onProcess: () => {},
+        queue: {
+          closeStdin: vi.fn(),
+          notifyIdle: vi.fn(),
+        } as any,
+      },
+    );
+
+    expect(runContainerAgentMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        prompt: expect.stringContaining(
+          'If the task completed successfully but nothing needs to be surfaced now',
+        ),
+      }),
+      expect.any(Function),
+      expect.any(Function),
+    );
   });
 });

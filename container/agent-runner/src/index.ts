@@ -5,7 +5,7 @@
  * Input protocol:
  *   Stdin: Full ContainerInput JSON (read until EOF, like before)
  *   IPC:   Follow-up messages written as JSON files to the host-provided IPC input directory
- *          Files: {type:"message", text:"..."}.json — polled and consumed
+ *          Files: {type:"message"|"background_activity", text:"..."}.json — polled and consumed
  *          Sentinel: _close inside that IPC input directory — signals session end
  *
  * Stdout protocol:
@@ -19,7 +19,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { resolveMcpServerLaunch } from './mcp-launch.js';
 import { createAgentRuntime } from './runtime/index.js';
-import { ContainerInput } from './runtime/types.js';
+import { ContainerInput, IpcInputMessage } from './runtime/types.js';
 
 interface ContainerOutput {
   status: 'success' | 'error';
@@ -58,21 +58,24 @@ function log(message: string): void {
  * Drain all pending IPC input messages.
  * Returns messages found, or empty array.
  */
-function drainIpcInput(ipcInputDir: string): string[] {
+function drainIpcInput(ipcInputDir: string): IpcInputMessage[] {
   try {
     fs.mkdirSync(ipcInputDir, { recursive: true });
     const files = fs.readdirSync(ipcInputDir)
       .filter(f => f.endsWith('.json'))
       .sort();
 
-    const messages: string[] = [];
+    const messages: IpcInputMessage[] = [];
     for (const file of files) {
       const filePath = path.join(ipcInputDir, file);
       try {
         const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
         fs.unlinkSync(filePath);
-        if (data.type === 'message' && data.text) {
-          messages.push(data.text);
+        if (
+          (data.type === 'message' || data.type === 'background_activity') &&
+          data.text
+        ) {
+          messages.push({ type: data.type, text: data.text });
         }
       } catch (err) {
         log(`Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`);
@@ -104,7 +107,7 @@ function shouldClose(closeSentinelPath: string): boolean {
 function waitForIpcMessage(
   ipcInputDir: string,
   closeSentinelPath: string,
-): Promise<string | null> {
+): Promise<{ prompt: string; backgroundOnly: boolean } | null> {
   return new Promise((resolve) => {
     const poll = () => {
       if (shouldClose(closeSentinelPath)) {
@@ -113,7 +116,7 @@ function waitForIpcMessage(
       }
       const messages = drainIpcInput(ipcInputDir);
       if (messages.length > 0) {
-        resolve(messages.join('\n'));
+        resolve(promptFromIpcMessages(messages));
         return;
       }
       setTimeout(poll, IPC_POLL_MS);
@@ -129,7 +132,19 @@ function mergePendingMessages(prompt: string, ipcInputDir: string): string {
   }
 
   log(`Draining ${pending.length} pending IPC messages into prompt`);
-  return `${prompt}\n${pending.join('\n')}`;
+  return `${prompt}\n${pending.map((message) => message.text).join('\n')}`;
+}
+
+function promptFromIpcMessages(messages: IpcInputMessage[]): {
+  prompt: string;
+  backgroundOnly: boolean;
+} {
+  return {
+    prompt: messages.map((message) => message.text).join('\n'),
+    backgroundOnly: messages.every(
+      (message) => message.type === 'background_activity',
+    ),
+  };
 }
 
 async function main(): Promise<void> {
@@ -192,6 +207,7 @@ async function main(): Promise<void> {
 
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
+  let backgroundOnly = false;
   try {
     while (true) {
       if (shouldClose(closeSentinelPath)) {
@@ -204,6 +220,7 @@ async function main(): Promise<void> {
 
       const queryResult = await runtime.runQuery({
         prompt,
+        backgroundOnly,
         sessionId,
         mcpServerCommand: mcpServer.command,
         mcpServerArgs: mcpServer.args,
@@ -231,8 +248,11 @@ async function main(): Promise<void> {
           `Restarting query with IPC follow-up input (${queryResult.nextPrompt.length} chars)`,
         );
         prompt = queryResult.nextPrompt;
+        backgroundOnly = queryResult.nextPromptBackgroundOnly === true;
         continue;
       }
+
+      backgroundOnly = false;
 
       // Emit session update so host can track it
       writeOutput({ status: 'success', result: null, newSessionId: sessionId });
@@ -257,8 +277,9 @@ async function main(): Promise<void> {
         break;
       }
 
-      log(`Got new message (${nextMessage.length} chars), starting new query`);
-      prompt = nextMessage;
+      log(`Got new IPC input (${nextMessage.prompt.length} chars), starting new query`);
+      prompt = nextMessage.prompt;
+      backgroundOnly = nextMessage.backgroundOnly;
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);

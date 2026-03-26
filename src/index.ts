@@ -13,14 +13,21 @@ import {
   getRegisteredChannelNames,
 } from './channels/registry.js';
 import {
+  BackgroundActivityItem,
+  buildBackgroundActivityPrompt,
+  extractBackgroundActivitySummary,
+} from './background-activity.js';
+import {
   ContainerOutput,
   runContainerAgent,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
+  buildLiveSessionKey,
   buildPromptWithBootstrap,
   isContextSourceEnabled,
+  prepareContextSessionForTurn,
   recordCompletedContextTurn,
 } from './context-runtime.js';
 import {
@@ -76,6 +83,46 @@ let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
+const pendingBackgroundActivities = new Map<string, BackgroundActivityItem[]>();
+
+function queuePendingBackgroundActivity(
+  chatJid: string,
+  item: BackgroundActivityItem,
+): void {
+  const existing = pendingBackgroundActivities.get(chatJid) || [];
+  existing.push(item);
+  pendingBackgroundActivities.set(chatJid, existing.slice(-5));
+}
+
+function drainPendingBackgroundActivityPrompt(chatJid: string): string | null {
+  const items = pendingBackgroundActivities.get(chatJid);
+  if (!items || items.length === 0) return null;
+  pendingBackgroundActivities.delete(chatJid);
+  return buildBackgroundActivityPrompt(items);
+}
+
+function publishBackgroundActivity(params: {
+  chatJid: string;
+  source: 'websocket' | 'scheduled';
+  result: string | null;
+  error?: string | null;
+}): void {
+  const summary = params.error
+    ? `${params.source} task failed: ${params.error}`
+    : extractBackgroundActivitySummary(params.result);
+  if (!summary) return;
+
+  const item: BackgroundActivityItem = {
+    source: params.source,
+    summary,
+  };
+  const backgroundPrompt = buildBackgroundActivityPrompt([item]);
+  if (queue.sendBackgroundActivity(params.chatJid, backgroundPrompt)) {
+    return;
+  }
+
+  queuePendingBackgroundActivity(params.chatJid, item);
+}
 let messageLoopRunning = false;
 
 const channels: Channel[] = [];
@@ -278,17 +325,25 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (finalResponse) {
     const participation = isContextSourceEnabled({ source: 'chat' });
     if (participation.enabled) {
+      const sessionKey = buildLiveSessionKey({
+        groupFolder: group.folder,
+        source: 'chat',
+        contextMode: 'group',
+      });
       await recordCompletedContextTurn({
         group,
         chatJid,
         source: 'chat',
         contextMode: 'group',
+        sessionKey,
         userPrompt: contextUserPrompt,
         assistantResponse: finalResponse,
         usage: latestUsage ?? output.usage,
         closeWorker: () => queue.closeStdin(chatJid),
         clearSessionCache: () => {
-          delete sessions[group.folder];
+          if (sessionKey) {
+            delete sessions[sessionKey];
+          }
         },
         invokeInternalPrompt: async (internalPrompt) =>
           runContainerAgent(
@@ -324,16 +379,39 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<ContainerOutput> {
   const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
   const participation = isContextSourceEnabled({ source: 'chat' });
+  const sessionKey = buildLiveSessionKey({
+    groupFolder: group.folder,
+    source: 'chat',
+    contextMode: 'group',
+  });
+  const sessionId = participation.enabled
+    ? sessionKey
+      ? prepareContextSessionForTurn({
+          groupFolder: group.folder,
+          sessionKey,
+          sessionId: sessions[sessionKey],
+          config: participation.config,
+          clearSessionCache: () => {
+            delete sessions[sessionKey];
+          },
+        })
+      : undefined
+    : sessionKey
+      ? sessions[sessionKey]
+      : undefined;
+  const pendingBackgroundPrompt = drainPendingBackgroundActivityPrompt(chatJid);
+  const promptWithBackground = pendingBackgroundPrompt
+    ? `${pendingBackgroundPrompt}\n\n${prompt}`
+    : prompt;
   const promptWithBootstrap = participation.enabled
     ? buildPromptWithBootstrap({
         groupFolder: group.folder,
         source: 'chat',
-        prompt,
+        prompt: promptWithBackground,
         sessionId,
       })
-    : prompt;
+    : promptWithBackground;
 
   // Update tasks snapshot for the worker to read (filtered by group)
   const tasks = getAllTasks();
@@ -363,9 +441,9 @@ async function runAgent(
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
-        if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+        if (sessionKey && output.newSessionId) {
+          sessions[sessionKey] = output.newSessionId;
+          setSession(sessionKey, output.newSessionId);
         }
         await onOutput(output);
       }
@@ -408,9 +486,9 @@ async function runAgent(
       wrappedOnOutput,
     );
 
-    if (output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+    if (sessionKey && output.newSessionId) {
+      sessions[sessionKey] = output.newSessionId;
+      setSession(sessionKey, output.newSessionId);
     }
 
     if (output.status === 'error') {
@@ -506,6 +584,12 @@ function enqueueWebSocketEventTask(params: {
           },
           'WS event task failed',
         );
+        publishBackgroundActivity({
+          chatJid: params.targetJid,
+          source: 'websocket',
+          result: execution.result,
+          error: execution.error,
+        });
       } else {
         logger.info(
           {
@@ -515,6 +599,11 @@ function enqueueWebSocketEventTask(params: {
           },
           'WS event task completed',
         );
+        publishBackgroundActivity({
+          chatJid: params.targetJid,
+          source: 'websocket',
+          result: execution.result,
+        });
       }
 
       resolve(execution);
@@ -728,6 +817,7 @@ async function main(): Promise<void> {
       const text = formatOutbound(rawText);
       if (text) await channel.sendMessage(jid, text);
     },
+    publishBackgroundActivity: (params) => publishBackgroundActivity(params),
   });
   startIpcWatcher({
     sendMessage: (jid, text) => {

@@ -27,9 +27,11 @@ describe('context-bootstrap', () => {
       recentTurns: turns,
       currentInput: 'please continue',
       currentSource: 'chat',
+      historyScope: 'shared',
     });
 
     expect(prompt).toContain('CONTEXT_BUNDLE');
+    expect(prompt).toContain('CONTEXT_RULES:');
     expect(prompt).toContain('STRUCTURED_SUMMARY_YAML:');
     expect(prompt).toContain('RECENT_TURNS:');
     expect(prompt).toContain('CURRENT_INPUT:');

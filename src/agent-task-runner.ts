@@ -9,8 +9,10 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
+  buildLiveSessionKey,
   buildPromptWithBootstrap,
   isContextSourceEnabled,
+  prepareContextSessionForTurn,
   recordCompletedContextTurn,
 } from './context-runtime.js';
 import { GroupQueue } from './group-queue.js';
@@ -54,6 +56,21 @@ export interface AgentTaskResult {
   usage?: TurnUsage;
 }
 
+const SCHEDULED_AUTO_REPLY_CONTRACT = [
+  'Channel reply requirements:',
+  '- Decide whether this run needs a user-facing reply.',
+  '- If the user should be informed, send a concise user-facing update suitable for the target channel.',
+  '- If the task completed successfully but nothing needs to be surfaced now, return only <internal>...</internal> content.',
+].join('\n');
+
+function buildTaskPrompt(request: AgentTaskRequest): string {
+  if (request.source === 'scheduled' && request.deliverOutput) {
+    return `${SCHEDULED_AUTO_REPLY_CONTRACT}\n\n${request.prompt}`;
+  }
+
+  return request.prompt;
+}
+
 function writeTaskSnapshot(group: RegisteredGroup): void {
   const isMain = group.isMain === true;
   const tasks = getAllTasks();
@@ -93,20 +110,37 @@ export async function runSingleTurnAgentTask(
 
   const isMain = group.isMain === true;
   const sessions = deps.getSessions();
-  const sessionId =
-    request.contextMode === 'group' ? sessions[group.folder] : undefined;
   const contextParticipation = isContextSourceEnabled({
     source: request.source,
     contextMode: request.contextMode,
   });
+  const sessionKey = buildLiveSessionKey({
+    groupFolder: group.folder,
+    source: request.source,
+    contextMode: request.contextMode,
+  });
+  const existingSessionId = sessionKey ? sessions[sessionKey] : undefined;
+  const sessionId = contextParticipation.enabled
+    ? sessionKey
+      ? prepareContextSessionForTurn({
+          groupFolder: group.folder,
+          sessionKey,
+          sessionId: existingSessionId,
+          config: contextParticipation.config,
+          clearSessionCache: () => {
+            delete sessions[sessionKey];
+          },
+        })
+      : undefined
+    : existingSessionId;
   const promptWithBootstrap = contextParticipation.enabled
     ? buildPromptWithBootstrap({
         groupFolder: group.folder,
         source: request.source,
-        prompt: request.prompt,
+        prompt: buildTaskPrompt(request),
         sessionId,
       })
-    : request.prompt;
+    : buildTaskPrompt(request);
 
   writeTaskSnapshot(group);
 
@@ -128,9 +162,9 @@ export async function runSingleTurnAgentTask(
     if (output.usage) {
       usage = output.usage;
     }
-    if (request.contextMode === 'group' && output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+    if (sessionKey && output.newSessionId) {
+      sessions[sessionKey] = output.newSessionId;
+      setSession(sessionKey, output.newSessionId);
     }
 
     if (output.result) {
@@ -178,9 +212,9 @@ export async function runSingleTurnAgentTask(
 
     if (closeTimer) clearTimeout(closeTimer);
 
-    if (request.contextMode === 'group' && output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+    if (sessionKey && output.newSessionId) {
+      sessions[sessionKey] = output.newSessionId;
+      setSession(sessionKey, output.newSessionId);
     }
 
     if (output.status === 'error') {
@@ -202,12 +236,15 @@ export async function runSingleTurnAgentTask(
       chatJid: request.chatJid,
       source: request.source,
       contextMode: request.contextMode,
+      sessionKey,
       userPrompt: request.prompt,
       assistantResponse: result,
       usage,
       closeWorker: () => deps.queue.closeStdin(request.chatJid),
       clearSessionCache: () => {
-        delete sessions[group.folder];
+        if (sessionKey) {
+          delete sessions[sessionKey];
+        }
       },
       invokeInternalPrompt: async (internalPrompt) =>
         runContainerAgent(

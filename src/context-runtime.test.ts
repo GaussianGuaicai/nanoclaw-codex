@@ -19,11 +19,16 @@ vi.mock('./summary-memory.js', async (importOriginal) => {
 
 import {
   _initTestDatabase,
+  insertContextTurn,
   getOrCreateGroupMemoryState,
   listContextTurnsForGroup,
+  updateGroupMemoryState,
 } from './db.js';
 import {
+  buildLiveSessionKey,
+  buildPromptWithBootstrap,
   isContextSourceEnabled,
+  prepareContextSessionForTurn,
   recordCompletedContextTurn,
 } from './context-runtime.js';
 import { RegisteredGroup } from './types.js';
@@ -114,6 +119,105 @@ describe('isContextSourceEnabled', () => {
   });
 });
 
+describe('buildLiveSessionKey', () => {
+  it('scopes chat and group event sessions separately', () => {
+    expect(
+      buildLiveSessionKey({
+        groupFolder: 'slack_main',
+        source: 'chat',
+      }),
+    ).toBe('slack_main::chat');
+    expect(
+      buildLiveSessionKey({
+        groupFolder: 'slack_main',
+        source: 'websocket',
+        contextMode: 'group',
+      }),
+    ).toBe('slack_main::websocket');
+    expect(
+      buildLiveSessionKey({
+        groupFolder: 'slack_main',
+        source: 'scheduled',
+        contextMode: 'isolated',
+      }),
+    ).toBeUndefined();
+  });
+});
+
+describe('buildPromptWithBootstrap', () => {
+  afterEach(() => {
+    _initTestDatabase();
+    vi.clearAllMocks();
+  });
+
+  it('limits non-chat bootstrap history to the current source and adds source-scoped guidance', () => {
+    loadContextConfigMock.mockReturnValue(baseConfig);
+
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'chat:test-room',
+      source: 'chat',
+      role: 'user',
+      content: 'Chat asked about recent device events.',
+      created_at: '2026-03-25T13:57:11.000Z',
+      est_tokens: 10,
+    });
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'chat:test-room',
+      source: 'scheduled',
+      role: 'user',
+      content: 'Scheduled task should run the target action.',
+      created_at: '2026-03-25T14:00:34.000Z',
+      est_tokens: 10,
+    });
+
+    const prompt = buildPromptWithBootstrap({
+      groupFolder: testGroup.folder,
+      source: 'scheduled',
+      prompt: 'Run the scheduled task now.',
+    });
+
+    expect(prompt).toContain('CURRENT_INPUT is the task to execute now');
+    expect(prompt).toContain('source `scheduled`');
+    expect(prompt).toContain('Scheduled task should run the target action.');
+    expect(prompt).not.toContain('Chat asked about recent device events.');
+  });
+
+  it('keeps shared recent turns for chat bootstrap', () => {
+    loadContextConfigMock.mockReturnValue(baseConfig);
+
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'chat:test-room',
+      source: 'chat',
+      role: 'user',
+      content: 'Chat asked about recent device events.',
+      created_at: '2026-03-25T13:57:11.000Z',
+      est_tokens: 10,
+    });
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'chat:test-room',
+      source: 'websocket',
+      role: 'assistant',
+      content: 'Realtime event was notify-only.',
+      created_at: '2026-03-25T14:26:46.000Z',
+      est_tokens: 10,
+    });
+
+    const prompt = buildPromptWithBootstrap({
+      groupFolder: testGroup.folder,
+      source: 'chat',
+      prompt: 'Answer the user.',
+    });
+
+    expect(prompt).toContain('may include multiple sources');
+    expect(prompt).toContain('Chat asked about recent device events.');
+    expect(prompt).toContain('Realtime event was notify-only.');
+  });
+});
+
 describe('recordCompletedContextTurn', () => {
   afterEach(() => {
     _initTestDatabase();
@@ -154,6 +258,7 @@ describe('recordCompletedContextTurn', () => {
       chatJid: 'slack:C0AL00L1C7J',
       source: 'chat',
       contextMode: 'group',
+      sessionKey: 'slack_main::chat',
       userPrompt: 'What tools do you have?',
       assistantResponse: 'I can inspect files, run commands, and help debug.',
       usage: {
@@ -210,6 +315,7 @@ describe('recordCompletedContextTurn', () => {
       chatJid: 'slack:C0AL00L1C7J',
       source: 'websocket',
       contextMode: 'group',
+      sessionKey: 'slack_main::websocket',
       userPrompt: 'User prompt one.',
       assistantResponse: 'Assistant response one.',
       usage: {
@@ -226,6 +332,7 @@ describe('recordCompletedContextTurn', () => {
       chatJid: 'slack:C0AL00L1C7J',
       source: 'websocket',
       contextMode: 'group',
+      sessionKey: 'slack_main::websocket',
       userPrompt: 'User prompt two.',
       assistantResponse: 'Assistant response two.',
       usage: {
@@ -246,6 +353,117 @@ describe('recordCompletedContextTurn', () => {
     expect(state.last_compaction_at).toBeTruthy();
     expect(state.last_summarized_turn_id).toBe(0);
     expect(closeWorker).toHaveBeenCalledTimes(1);
+    expect(clearSessionCache).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('prepareContextSessionForTurn', () => {
+  afterEach(() => {
+    _initTestDatabase();
+    vi.clearAllMocks();
+  });
+
+  it('does not clear an existing session when compaction triggers but boundary does not advance', async () => {
+    loadContextConfigMock.mockReturnValue(baseConfig);
+
+    const clearSessionCache = vi.fn();
+    const invokeInternalPrompt = vi.fn();
+
+    await recordCompletedContextTurn({
+      group: testGroup,
+      chatJid: 'slack:C0AL00L1C7J',
+      source: 'chat',
+      contextMode: 'group',
+      userPrompt: 'A short prompt.',
+      assistantResponse: 'A short response.',
+      usage: {
+        inputTokens: 60000,
+        outputTokens: 200,
+      },
+      closeWorker: vi.fn(),
+      clearSessionCache: vi.fn(),
+      invokeInternalPrompt,
+    });
+
+    const sessionId = prepareContextSessionForTurn({
+      groupFolder: testGroup.folder,
+      sessionKey: 'slack_main::chat',
+      sessionId: 'existing-session',
+      config: baseConfig,
+      clearSessionCache,
+    });
+
+    expect(sessionId).toBe('existing-session');
+    expect(clearSessionCache).not.toHaveBeenCalled();
+  });
+
+  it('clears an existing session only when compaction advances the boundary', () => {
+    loadContextConfigMock.mockReturnValue(baseConfig);
+
+    const clearSessionCache = vi.fn();
+    const config = {
+      ...baseConfig,
+      compaction: {
+        ...baseConfig.compaction,
+        window: {
+          keepRecentTurns: 1,
+          keepRecentEstimatedTokens: 10,
+        },
+      },
+    };
+
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'slack:C0AL00L1C7J',
+      source: 'chat',
+      role: 'user',
+      content: 'turn-1',
+      created_at: '2026-03-22T00:00:00.000Z',
+      est_tokens: 10,
+      actual_input_tokens: null,
+      actual_output_tokens: null,
+      batch_id: null,
+      metadata_json: null,
+    });
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'slack:C0AL00L1C7J',
+      source: 'chat',
+      role: 'assistant',
+      content: 'turn-2',
+      created_at: '2026-03-22T00:00:01.000Z',
+      est_tokens: 10,
+      actual_input_tokens: null,
+      actual_output_tokens: null,
+      batch_id: null,
+      metadata_json: null,
+    });
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'slack:C0AL00L1C7J',
+      source: 'chat',
+      role: 'user',
+      content: 'turn-3',
+      created_at: '2026-03-22T00:00:02.000Z',
+      est_tokens: 10,
+      actual_input_tokens: null,
+      actual_output_tokens: null,
+      batch_id: null,
+      metadata_json: null,
+    });
+    updateGroupMemoryState(testGroup.folder, {
+      last_input_tokens: 60000,
+    });
+
+    const sessionId = prepareContextSessionForTurn({
+      groupFolder: testGroup.folder,
+      sessionKey: 'slack_main::chat',
+      sessionId: 'existing-session',
+      config,
+      clearSessionCache,
+    });
+
+    expect(sessionId).toBeUndefined();
     expect(clearSessionCache).toHaveBeenCalledTimes(1);
   });
 });

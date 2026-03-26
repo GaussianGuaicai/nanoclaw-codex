@@ -68,12 +68,89 @@ export function buildPromptWithBootstrap(params: {
     params.groupFolder,
     memoryState.last_compacted_turn_id,
   );
+  const historyScope =
+    params.source === 'chat' ? ('shared' as const) : ('source-only' as const);
+  const scopedRecentTurns =
+    historyScope === 'shared'
+      ? recentTurns
+      : recentTurns.filter((turn) => turn.source === params.source);
   return buildContextBootstrapPrompt({
     summaryYaml: memoryState.summary_yaml,
-    recentTurns,
+    recentTurns: scopedRecentTurns,
     currentInput: params.prompt,
     currentSource: params.source,
+    historyScope,
   });
+}
+
+export function buildLiveSessionKey(params: {
+  groupFolder: string;
+  source: AgentTaskSource;
+  contextMode?: EventExecutionContextMode;
+}): string | undefined {
+  if (params.source === 'chat') {
+    return `${params.groupFolder}::chat`;
+  }
+
+  if (params.contextMode !== 'group') {
+    return undefined;
+  }
+
+  return `${params.groupFolder}::${params.source}`;
+}
+
+export function prepareContextSessionForTurn(params: {
+  groupFolder: string;
+  sessionKey: string;
+  sessionId?: string;
+  config: ReturnType<typeof loadContextConfig>;
+  clearSessionCache: () => void;
+}): string | undefined {
+  const existingSessionId = params.sessionId?.trim();
+  if (!existingSessionId) {
+    return undefined;
+  }
+
+  if (!params.config.compaction.enabled) {
+    return existingSessionId;
+  }
+
+  const memoryState = getOrCreateGroupMemoryState(params.groupFolder);
+  const activeTurns = getContextTurnsAfterId(
+    params.groupFolder,
+    memoryState.last_compacted_turn_id,
+  );
+  const decision = shouldCompactContext({
+    config: params.config.compaction,
+    memoryState,
+    activeTurns,
+  });
+
+  if (!decision.shouldCompact) {
+    return existingSessionId;
+  }
+
+  const newBoundary = computeSlidingWindowBoundary({
+    activeTurns,
+    window: params.config.compaction.window,
+  });
+
+  if (newBoundary <= memoryState.last_compacted_turn_id) {
+    return existingSessionId;
+  }
+
+  updateGroupMemoryState(params.groupFolder, {
+    last_compacted_turn_id: newBoundary,
+    last_compaction_at: new Date().toISOString(),
+  });
+
+  if (params.config.compaction.restartSessionAfterCompact) {
+    clearSession(params.sessionKey);
+    params.clearSessionCache();
+    return undefined;
+  }
+
+  return existingSessionId;
 }
 
 export async function recordCompletedContextTurn(params: {
@@ -81,6 +158,7 @@ export async function recordCompletedContextTurn(params: {
   chatJid: string;
   source: AgentTaskSource;
   contextMode?: EventExecutionContextMode;
+  sessionKey?: string;
   userPrompt: string;
   assistantResponse: string | null;
   usage?: TurnUsage;
@@ -211,7 +289,9 @@ export async function recordCompletedContextTurn(params: {
   });
 
   if (config.compaction.restartSessionAfterCompact) {
-    clearSession(params.group.folder);
+    if (params.sessionKey) {
+      clearSession(params.sessionKey);
+    }
     params.clearSessionCache();
     params.closeWorker();
   }

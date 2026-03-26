@@ -147,7 +147,10 @@ describe('event source template helpers', () => {
     );
     expect(prompt).toContain('Channel reply requirements:');
     expect(prompt).toContain(
-      'Send a concise user-facing reply suitable for the target channel.',
+      'Decide whether this event needs a user-facing reply.',
+    );
+    expect(prompt).toContain(
+      'If no user-visible update is needed, return only <internal>...</internal> content.',
     );
     expect(prompt).toContain('source=ha_main');
   });

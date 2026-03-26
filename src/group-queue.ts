@@ -158,6 +158,22 @@ export class GroupQueue {
    * Returns true if the message was written, false if no active worker.
    */
   sendMessage(groupJid: string, text: string): boolean {
+    return this.writeIpcInput(groupJid, 'message', text);
+  }
+
+  /**
+   * Send background activity to the active chat worker via IPC file.
+   * Returns true if the update was written, false if no active chat worker.
+   */
+  sendBackgroundActivity(groupJid: string, text: string): boolean {
+    return this.writeIpcInput(groupJid, 'background_activity', text);
+  }
+
+  private writeIpcInput(
+    groupJid: string,
+    type: 'message' | 'background_activity',
+    text: string,
+  ): boolean {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.groupFolder || state.isTaskWorker) return false;
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
@@ -168,7 +184,7 @@ export class GroupQueue {
       const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
       const filepath = path.join(inputDir, filename);
       const tempPath = `${filepath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }));
+      fs.writeFileSync(tempPath, JSON.stringify({ type, text }));
       fs.renameSync(tempPath, filepath);
       return true;
     } catch {

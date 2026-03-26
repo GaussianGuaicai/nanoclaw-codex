@@ -413,6 +413,38 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
+  it('sendBackgroundActivity writes a background_activity IPC payload', async () => {
+    const fs = await import('fs');
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess('group1@g.us', {} as any, 'worker-1', 'test-group');
+
+    const result = queue.sendBackgroundActivity(
+      'group1@g.us',
+      '[BACKGROUND ACTIVITY]\n- [websocket] turned devices off',
+    );
+
+    expect(result).toBe(true);
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    expect(writeFileSync).toHaveBeenCalledWith(
+      expect.stringMatching(/\.tmp$/),
+      expect.stringContaining('"type":"background_activity"'),
+    );
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
   it('preempts when idle arrives with pending tasks', async () => {
     const fs = await import('fs');
     let resolveProcess: () => void;

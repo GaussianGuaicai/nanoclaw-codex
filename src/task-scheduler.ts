@@ -68,6 +68,12 @@ export interface SchedulerDependencies {
     groupFolder: string,
   ) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
+  publishBackgroundActivity?: (params: {
+    chatJid: string;
+    source: 'scheduled';
+    result: string | null;
+    error?: string | null;
+  }) => void;
 }
 
 async function runTask(
@@ -132,7 +138,7 @@ async function runTask(
       contextMode: task.context_mode,
       source: 'scheduled',
       agentConfigOverride: task.agent_config,
-      deliverOutput: true,
+      deliverOutput: task.deliver_output !== false,
       isScheduledTask: true,
       assistantName: ASSISTANT_NAME,
     },
@@ -149,11 +155,22 @@ async function runTask(
 
   if (error) {
     logger.error({ taskId: task.id, error }, 'Task failed');
+    deps.publishBackgroundActivity?.({
+      chatJid: task.chat_jid,
+      source: 'scheduled',
+      result,
+      error,
+    });
   } else {
     logger.info(
       { taskId: task.id, durationMs: Date.now() - startTime },
       'Task completed',
     );
+    deps.publishBackgroundActivity?.({
+      chatJid: task.chat_jid,
+      source: 'scheduled',
+      result,
+    });
   }
 
   const durationMs = Date.now() - startTime;

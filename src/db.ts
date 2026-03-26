@@ -51,6 +51,7 @@ function createSchema(database: Database.Database): void {
       prompt TEXT NOT NULL,
       schedule_type TEXT NOT NULL,
       schedule_value TEXT NOT NULL,
+      deliver_output INTEGER DEFAULT 1,
       agent_config TEXT,
       next_run TEXT,
       last_run TEXT,
@@ -137,6 +138,15 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Add deliver_output column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN deliver_output INTEGER DEFAULT 1`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
   // Add is_bot_message column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(
@@ -191,9 +201,19 @@ export function initDatabase(): void {
 
   db = new Database(dbPath);
   createSchema(db);
-
   // Migrate from JSON files if they exist
   migrateJsonState();
+
+  const sessionMigration = migrateLegacyLiveSessions();
+  if (sessionMigration.migrated > 0 || sessionMigration.dropped > 0) {
+    logger.info(
+      {
+        migrated: sessionMigration.migrated,
+        dropped: sessionMigration.dropped,
+      },
+      'Migrated legacy live session keys',
+    );
+  }
 }
 
 /** @internal - for tests only. Creates a fresh in-memory database. */
@@ -402,8 +422,8 @@ export function createTask(
 ): void {
   db.prepare(
     `
-    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, agent_config, next_run, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, deliver_output, agent_config, next_run, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     task.id,
@@ -413,6 +433,7 @@ export function createTask(
     task.schedule_type,
     task.schedule_value,
     task.context_mode || 'isolated',
+    task.deliver_output === false ? 0 : 1,
     task.agent_config ? JSON.stringify(task.agent_config) : null,
     task.next_run,
     task.status,
@@ -527,6 +548,7 @@ interface ScheduledTaskRow {
   schedule_type: 'cron' | 'interval' | 'once';
   schedule_value: string;
   context_mode: 'group' | 'isolated';
+  deliver_output: number | null;
   agent_config: string | null;
   next_run: string | null;
   last_run: string | null;
@@ -550,6 +572,7 @@ function parseScheduledTaskRow(row: ScheduledTaskRow): ScheduledTask {
 
   return {
     ...row,
+    deliver_output: row.deliver_output !== 0,
     agent_config: agentConfig,
   };
 }
@@ -609,6 +632,46 @@ export function getAllSessions(): Record<string, string> {
     result[row.group_folder] = row.session_id;
   }
   return result;
+}
+
+export function migrateLegacyLiveSessions(): {
+  migrated: number;
+  dropped: number;
+} {
+  const legacyRows = db
+    .prepare(
+      `
+      SELECT group_folder, session_id
+      FROM sessions
+      WHERE instr(group_folder, '::') = 0
+    `,
+    )
+    .all() as Array<{ group_folder: string; session_id: string }>;
+
+  let migrated = 0;
+  let dropped = 0;
+
+  for (const row of legacyRows) {
+    const targetKey = `${row.group_folder}::chat`;
+    const existingScoped = db
+      .prepare('SELECT 1 FROM sessions WHERE group_folder = ?')
+      .get(targetKey) as { 1: number } | undefined;
+
+    if (existingScoped) {
+      db.prepare('DELETE FROM sessions WHERE group_folder = ?').run(
+        row.group_folder,
+      );
+      dropped += 1;
+      continue;
+    }
+
+    db.prepare(
+      'UPDATE sessions SET group_folder = ? WHERE group_folder = ?',
+    ).run(targetKey, row.group_folder);
+    migrated += 1;
+  }
+
+  return { migrated, dropped };
 }
 
 export function clearSession(groupFolder: string): void {

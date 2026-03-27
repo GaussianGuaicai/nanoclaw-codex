@@ -6,6 +6,7 @@ import {
   getContextTurnsInRange,
   getLatestContextTurnId,
   getOrCreateGroupMemoryState,
+  insertContextMemoryEvent,
   insertContextTurn,
   updateGroupMemoryState,
 } from './db.js';
@@ -21,6 +22,7 @@ import { updateSummaryMemory } from './summary-memory.js';
 import {
   AgentTaskSource,
   EventExecutionContextMode,
+  GroupMemoryState,
   RegisteredGroup,
   TurnUsage,
 } from './types.js';
@@ -99,6 +101,87 @@ export function buildLiveSessionKey(params: {
   return `${params.groupFolder}::${params.source}`;
 }
 
+interface MemoryStateSnapshot {
+  summaryYaml: string;
+  lastSummarizedTurnId: number;
+  lastCompactedTurnId: number;
+  lastSummaryAt: string | null;
+  lastCompactionAt: string | null;
+}
+
+function snapshotMemoryState(memoryState: GroupMemoryState): MemoryStateSnapshot {
+  return {
+    summaryYaml: memoryState.summary_yaml,
+    lastSummarizedTurnId: memoryState.last_summarized_turn_id,
+    lastCompactedTurnId: memoryState.last_compacted_turn_id,
+    lastSummaryAt: memoryState.last_summary_at ?? null,
+    lastCompactionAt: memoryState.last_compaction_at ?? null,
+  };
+}
+
+function createEmptyMemoryAuditPayload(params: {
+  source: AgentTaskSource;
+  contextMode?: EventExecutionContextMode;
+  sessionKey?: string;
+  memoryState: GroupMemoryState;
+  compactionEnabled: boolean;
+  restartSessionAfterCompact: boolean;
+}): {
+  version: 1;
+  source: AgentTaskSource;
+  contextMode?: EventExecutionContextMode;
+  sessionKey?: string;
+  summary: {
+    attempted: boolean;
+    succeeded: boolean;
+    repaired: boolean;
+    deltaTurnCount: number;
+    deltaTurnIds: number[];
+    before: MemoryStateSnapshot;
+    after: MemoryStateSnapshot | null;
+    error: string | null;
+  };
+  compaction: {
+    enabled: boolean;
+    attempted: boolean;
+    shouldCompact: boolean;
+    reason: 'usage' | 'estimate' | null;
+    estimatedActiveTokens: number;
+    boundaryBefore: number;
+    boundaryAfter: number;
+    restartSessionAfterCompact: boolean;
+    sessionRestarted: boolean;
+  };
+} {
+  return {
+    version: 1,
+    source: params.source,
+    ...(params.contextMode ? { contextMode: params.contextMode } : {}),
+    ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
+    summary: {
+      attempted: false,
+      succeeded: false,
+      repaired: false,
+      deltaTurnCount: 0,
+      deltaTurnIds: [],
+      before: snapshotMemoryState(params.memoryState),
+      after: null,
+      error: null,
+    },
+    compaction: {
+      enabled: params.compactionEnabled,
+      attempted: false,
+      shouldCompact: false,
+      reason: null,
+      estimatedActiveTokens: 0,
+      boundaryBefore: params.memoryState.last_compacted_turn_id,
+      boundaryAfter: params.memoryState.last_compacted_turn_id,
+      restartSessionAfterCompact: params.restartSessionAfterCompact,
+      sessionRestarted: false,
+    },
+  };
+}
+
 export function prepareContextSessionForTurn(params: {
   groupFolder: string;
   sessionKey: string;
@@ -175,6 +258,18 @@ export async function recordCompletedContextTurn(params: {
   const { config } = participation;
   const now = new Date().toISOString();
   const batchId = randomUUID();
+  let memoryState = updateGroupMemoryState(params.group.folder, {
+    last_input_tokens: params.usage?.inputTokens ?? null,
+    last_output_tokens: params.usage?.outputTokens ?? null,
+  });
+  const audit = createEmptyMemoryAuditPayload({
+    source: params.source,
+    contextMode: params.contextMode,
+    sessionKey: params.sessionKey,
+    memoryState,
+    compactionEnabled: config.compaction.enabled,
+    restartSessionAfterCompact: config.compaction.restartSessionAfterCompact,
+  });
 
   insertContextTurn({
     group_folder: params.group.folder,
@@ -206,11 +301,6 @@ export async function recordCompletedContextTurn(params: {
     });
   }
 
-  let memoryState = updateGroupMemoryState(params.group.folder, {
-    last_input_tokens: params.usage?.inputTokens ?? null,
-    last_output_tokens: params.usage?.outputTokens ?? null,
-  });
-
   const latestTurnId = getLatestContextTurnId(params.group.folder);
   const unsummarizedTurns = latestTurnId - memoryState.last_summarized_turn_id;
 
@@ -223,6 +313,9 @@ export async function recordCompletedContextTurn(params: {
       memoryState.last_summarized_turn_id,
       latestTurnId,
     );
+    audit.summary.attempted = true;
+    audit.summary.deltaTurnCount = deltaTurns.length;
+    audit.summary.deltaTurnIds = deltaTurns.map((turn) => turn.id);
 
     try {
       const summaryResult = await updateSummaryMemory({
@@ -248,7 +341,11 @@ export async function recordCompletedContextTurn(params: {
         last_summarized_turn_id: latestTurnId,
         last_summary_at: new Date().toISOString(),
       });
+      audit.summary.succeeded = true;
+      audit.summary.repaired = summaryResult.repaired;
+      audit.summary.after = snapshotMemoryState(memoryState);
     } catch (error) {
+      audit.summary.error = error instanceof Error ? error.message : String(error);
       logger.warn(
         { group: params.group.folder, error },
         'Summary memory update failed; preserving previous summary',
@@ -257,6 +354,14 @@ export async function recordCompletedContextTurn(params: {
   }
 
   if (!config.compaction.enabled) {
+    if (audit.summary.attempted) {
+      insertContextMemoryEvent({
+        group_folder: params.group.folder,
+        event_type: 'summary-memory-maintenance',
+        created_at: now,
+        payload: audit,
+      });
+    }
     return;
   }
 
@@ -270,8 +375,19 @@ export async function recordCompletedContextTurn(params: {
     usage: params.usage,
     activeTurns,
   });
+  audit.compaction.shouldCompact = decision.shouldCompact;
+  audit.compaction.reason = decision.reason ?? null;
+  audit.compaction.estimatedActiveTokens = decision.estimatedActiveTokens;
 
   if (!decision.shouldCompact) {
+    if (audit.summary.attempted) {
+      insertContextMemoryEvent({
+        group_folder: params.group.folder,
+        event_type: 'summary-memory-maintenance',
+        created_at: now,
+        payload: audit,
+      });
+    }
     return;
   }
 
@@ -279,11 +395,19 @@ export async function recordCompletedContextTurn(params: {
     activeTurns,
     window: config.compaction.window,
   });
+  audit.compaction.attempted = true;
+  audit.compaction.boundaryAfter = newBoundary;
   if (newBoundary <= memoryState.last_compacted_turn_id) {
+    insertContextMemoryEvent({
+      group_folder: params.group.folder,
+      event_type: 'summary-memory-maintenance',
+      created_at: now,
+      payload: audit,
+    });
     return;
   }
 
-  updateGroupMemoryState(params.group.folder, {
+  memoryState = updateGroupMemoryState(params.group.folder, {
     last_compacted_turn_id: newBoundary,
     last_compaction_at: new Date().toISOString(),
   });
@@ -294,5 +418,15 @@ export async function recordCompletedContextTurn(params: {
     }
     params.clearSessionCache();
     params.closeWorker();
+    audit.compaction.sessionRestarted = true;
+  }
+
+  if (audit.summary.attempted || audit.compaction.attempted) {
+    insertContextMemoryEvent({
+      group_folder: params.group.folder,
+      event_type: 'summary-memory-maintenance',
+      created_at: now,
+      payload: audit,
+    });
   }
 }

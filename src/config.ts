@@ -45,6 +45,12 @@ export const AGENT_CONFIG_PATH = path.join(
   'nanoclaw',
   'agent-config.json',
 );
+export const GROUP_SECRETS_PATH = path.join(
+  HOME_DIR,
+  '.config',
+  'nanoclaw',
+  'group-secrets.json',
+);
 export const CONTEXT_CONFIG_PATH = path.join(
   HOME_DIR,
   '.config',

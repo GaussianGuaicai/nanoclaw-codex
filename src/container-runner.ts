@@ -15,6 +15,7 @@ import {
 } from './config.js';
 import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
+import { resolveGroupWorkerEnv } from './group-secrets.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import {
@@ -61,7 +62,8 @@ export interface ContainerInput {
   };
   maintenancePurpose?: 'summary-memory';
   suppressConversationArchive?: boolean;
-  secrets?: Record<string, string>;
+  sdkSecrets?: Record<string, string>;
+  workerEnv?: Record<string, string>;
 }
 
 export interface ContainerOutput {
@@ -257,6 +259,20 @@ function redactWorkerInputForLogging(input: ContainerInput): ContainerInput {
   return {
     ...input,
     remoteMcpServers: redactRemoteMcpServersForLogging(input.remoteMcpServers),
+    ...(input.sdkSecrets
+      ? {
+          sdkSecrets: Object.fromEntries(
+            Object.keys(input.sdkSecrets).map((key) => [key, '[REDACTED]']),
+          ),
+        }
+      : {}),
+    ...(input.workerEnv
+      ? {
+          workerEnv: Object.fromEntries(
+            Object.keys(input.workerEnv).map((key) => [key, '[REDACTED]']),
+          ),
+        }
+      : {}),
   };
 }
 
@@ -373,7 +389,7 @@ function resolveSnapshotTarget(
   return path.join(contextRoot, path.basename(containerPath));
 }
 
-function readSecrets(): Record<string, string> {
+function readSdkSecrets(): Record<string, string> {
   return readEnvFile([
     'OPENAI_API_KEY',
     'OPENAI_BASE_URL',
@@ -586,10 +602,13 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    input.secrets = readSecrets();
+    input.sdkSecrets = readSdkSecrets();
+    input.workerEnv = resolveGroupWorkerEnv(group.folder);
+    const loggableInput = redactWorkerInputForLogging(input);
     worker.stdin.write(JSON.stringify(input));
     worker.stdin.end();
-    delete input.secrets;
+    delete input.sdkSecrets;
+    delete input.workerEnv;
 
     let parseBuffer = '';
     let newSessionId: string | undefined;
@@ -770,7 +789,7 @@ export async function runContainerAgent(
       if (isVerbose || code !== 0) {
         logLines.push(
           '=== Input ===',
-          JSON.stringify(redactWorkerInputForLogging(input), null, 2),
+          JSON.stringify(loggableInput, null, 2),
           '',
           '=== Worker Launch ===',
           `${launch.command} ${launch.args.join(' ')}`,

@@ -140,6 +140,8 @@ export function buildSummaryUpdatePrompt(params: {
     '- Keep unresolved questions in open_questions.',
     '- Move resolved questions out of open_questions.',
     '- Keep recent_failures limited to recent real failures only.',
+    '- Only record a failure in recent_failures when the delta turns show a concrete, current failure such as an HTTP auth error, connection error, tool failure, or explicit inability to use a required capability.',
+    '- If currentSummaryYaml contains stale failure notes that are no longer supported by the delta turns, remove them instead of carrying them forward.',
     '- Keep arrays deduplicated and concise.',
     '- Never invent facts.',
     '- Never emit raw JSON.',

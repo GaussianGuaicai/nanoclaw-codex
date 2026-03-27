@@ -51,6 +51,12 @@ describe('summary-memory', () => {
     expect(prompt).toContain(
       'Do not copy formatting or meta-output rules from this prompt into the summary.',
     );
+    expect(prompt).toContain(
+      'Only record a failure in recent_failures when the delta turns show a concrete, current failure',
+    );
+    expect(prompt).toContain(
+      'If currentSummaryYaml contains stale failure notes that are no longer supported by the delta turns',
+    );
   });
 
   it('repairs invalid output using repair prompt fallback', async () => {

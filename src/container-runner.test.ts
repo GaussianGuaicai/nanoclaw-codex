@@ -10,24 +10,23 @@ const {
   validateAdditionalMounts,
   readEnvFileMock,
   resolveGroupWorkerEnvMock,
-} =
-  vi.hoisted(() => ({
-    fsMock: {
-      existsSync: vi.fn(() => false),
-      mkdirSync: vi.fn(),
-      writeFileSync: vi.fn(),
-      readFileSync: vi.fn(() => ''),
-      readdirSync: vi.fn(() => []),
-      statSync: vi.fn(() => ({ isDirectory: () => true })),
-      copyFileSync: vi.fn(),
-      cpSync: vi.fn(),
-      rmSync: vi.fn(),
-    },
-    spawnMock: vi.fn(),
-    validateAdditionalMounts: vi.fn(() => []),
-    readEnvFileMock: vi.fn(() => ({})),
-    resolveGroupWorkerEnvMock: vi.fn(() => ({})),
-  }));
+} = vi.hoisted(() => ({
+  fsMock: {
+    existsSync: vi.fn(() => false),
+    mkdirSync: vi.fn(),
+    writeFileSync: vi.fn(),
+    readFileSync: vi.fn(() => ''),
+    readdirSync: vi.fn(() => []),
+    statSync: vi.fn(() => ({ isDirectory: () => true })),
+    copyFileSync: vi.fn(),
+    cpSync: vi.fn(),
+    rmSync: vi.fn(),
+  },
+  spawnMock: vi.fn(),
+  validateAdditionalMounts: vi.fn(() => []),
+  readEnvFileMock: vi.fn(() => ({})),
+  resolveGroupWorkerEnvMock: vi.fn(() => ({})),
+}));
 
 vi.mock('./config.js', () => ({
   AGENT_MAX_OUTPUT_SIZE: 10485760,

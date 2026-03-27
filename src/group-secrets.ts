@@ -52,7 +52,9 @@ export function loadGroupSecretsConfig(): GroupSecretsConfig {
   }
 }
 
-export function resolveGroupWorkerEnv(groupFolder: string): Record<string, string> {
+export function resolveGroupWorkerEnv(
+  groupFolder: string,
+): Record<string, string> {
   const config = loadGroupSecretsConfig();
   const groupConfig = config.groups[groupFolder];
   if (!groupConfig) {

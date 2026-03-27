@@ -24,7 +24,10 @@ vi.mock('./logger.js', () => ({
   },
 }));
 
-import { loadGroupSecretsConfig, resolveGroupWorkerEnv } from './group-secrets.js';
+import {
+  loadGroupSecretsConfig,
+  resolveGroupWorkerEnv,
+} from './group-secrets.js';
 
 describe('group secrets config', () => {
   beforeEach(() => {

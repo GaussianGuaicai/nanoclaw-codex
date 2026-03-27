@@ -896,9 +896,7 @@ export function insertContextMemoryEvent(params: {
   return Number(result.lastInsertRowid);
 }
 
-export function listContextMemoryEventsForGroup(
-  groupFolder: string,
-): Array<{
+export function listContextMemoryEventsForGroup(groupFolder: string): Array<{
   id: number;
   group_folder: string;
   event_type: string;

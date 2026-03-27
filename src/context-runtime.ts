@@ -109,7 +109,9 @@ interface MemoryStateSnapshot {
   lastCompactionAt: string | null;
 }
 
-function snapshotMemoryState(memoryState: GroupMemoryState): MemoryStateSnapshot {
+function snapshotMemoryState(
+  memoryState: GroupMemoryState,
+): MemoryStateSnapshot {
   return {
     summaryYaml: memoryState.summary_yaml,
     lastSummarizedTurnId: memoryState.last_summarized_turn_id,
@@ -345,7 +347,8 @@ export async function recordCompletedContextTurn(params: {
       audit.summary.repaired = summaryResult.repaired;
       audit.summary.after = snapshotMemoryState(memoryState);
     } catch (error) {
-      audit.summary.error = error instanceof Error ? error.message : String(error);
+      audit.summary.error =
+        error instanceof Error ? error.message : String(error);
       logger.warn(
         { group: params.group.folder, error },
         'Summary memory update failed; preserving previous summary',

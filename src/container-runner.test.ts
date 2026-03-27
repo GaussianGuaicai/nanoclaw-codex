@@ -4,23 +4,29 @@ import { PassThrough } from 'stream';
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
-const { fsMock, spawnMock, validateAdditionalMounts, readEnvFileMock } =
-  vi.hoisted(() => ({
-    fsMock: {
-      existsSync: vi.fn(() => false),
-      mkdirSync: vi.fn(),
-      writeFileSync: vi.fn(),
-      readFileSync: vi.fn(() => ''),
-      readdirSync: vi.fn(() => []),
-      statSync: vi.fn(() => ({ isDirectory: () => true })),
-      copyFileSync: vi.fn(),
-      cpSync: vi.fn(),
-      rmSync: vi.fn(),
-    },
-    spawnMock: vi.fn(),
-    validateAdditionalMounts: vi.fn(() => []),
-    readEnvFileMock: vi.fn(() => ({})),
-  }));
+const {
+  fsMock,
+  spawnMock,
+  validateAdditionalMounts,
+  readEnvFileMock,
+  resolveGroupWorkerEnvMock,
+} = vi.hoisted(() => ({
+  fsMock: {
+    existsSync: vi.fn(() => false),
+    mkdirSync: vi.fn(),
+    writeFileSync: vi.fn(),
+    readFileSync: vi.fn(() => ''),
+    readdirSync: vi.fn(() => []),
+    statSync: vi.fn(() => ({ isDirectory: () => true })),
+    copyFileSync: vi.fn(),
+    cpSync: vi.fn(),
+    rmSync: vi.fn(),
+  },
+  spawnMock: vi.fn(),
+  validateAdditionalMounts: vi.fn(() => []),
+  readEnvFileMock: vi.fn(() => ({})),
+  resolveGroupWorkerEnvMock: vi.fn(() => ({})),
+}));
 
 vi.mock('./config.js', () => ({
   AGENT_MAX_OUTPUT_SIZE: 10485760,
@@ -56,6 +62,10 @@ vi.mock('./mount-security.js', () => ({
 
 vi.mock('./env.js', () => ({
   readEnvFile: readEnvFileMock,
+}));
+
+vi.mock('./group-secrets.js', () => ({
+  resolveGroupWorkerEnv: resolveGroupWorkerEnvMock,
 }));
 
 function createFakeProcess() {
@@ -130,6 +140,7 @@ describe('container-runner worker execution', () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     readEnvFileMock.mockReturnValue({});
+    resolveGroupWorkerEnvMock.mockReturnValue({});
     fakeProc = createFakeProcess();
     spawnMock.mockReturnValue(fakeProc);
     validateAdditionalMounts.mockReturnValue([]);
@@ -434,7 +445,52 @@ describe('container-runner worker execution', () => {
     expect(workerInput.remoteMcpBridgeNames).toEqual(['internal_docs']);
   });
 
+  it('passes sdkSecrets and workerEnv to the worker input', async () => {
+    const stdinChunks: Buffer[] = [];
+    readEnvFileMock.mockReturnValue({
+      OPENAI_API_KEY: 'sdk-secret',
+    });
+    resolveGroupWorkerEnvMock.mockReturnValue({
+      HOME_ASSISTANT_URL: 'https://ha.example',
+      HASS_ACCESS_TOKEN: 'worker-secret',
+    });
+    fakeProc.stdin.on('data', (chunk) => {
+      stdinChunks.push(Buffer.from(chunk));
+    });
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      { ...testInput },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'ok',
+      newSessionId: 'session-worker-env',
+    });
+    fakeProc.emit('close', 0);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('success');
+
+    const workerInput = JSON.parse(Buffer.concat(stdinChunks).toString('utf8'));
+    expect(workerInput.sdkSecrets).toEqual({
+      OPENAI_API_KEY: 'sdk-secret',
+    });
+    expect(workerInput.workerEnv).toEqual({
+      HOME_ASSISTANT_URL: 'https://ha.example',
+      HASS_ACCESS_TOKEN: 'worker-secret',
+    });
+  });
+
   it('redacts remote MCP headers before writing worker logs', async () => {
+    readEnvFileMock.mockReturnValue({
+      OPENAI_API_KEY: 'sdk-secret',
+    });
+    resolveGroupWorkerEnvMock.mockReturnValue({
+      HASS_ACCESS_TOKEN: 'worker-secret',
+    });
     const resultPromise = runContainerAgent(
       {
         ...testGroup,
@@ -471,8 +527,12 @@ describe('container-runner worker execution', () => {
     const logContent = String(logWrite?.[1]);
     expect(logContent).toContain('"Authorization": "[REDACTED]"');
     expect(logContent).toContain('"X-Api-Key": "[REDACTED]"');
+    expect(logContent).toContain('"OPENAI_API_KEY": "[REDACTED]"');
+    expect(logContent).toContain('"HASS_ACCESS_TOKEN": "[REDACTED]"');
     expect(logContent).not.toContain('Bearer secret-token');
     expect(logContent).not.toContain('top-secret');
+    expect(logContent).not.toContain('sdk-secret');
+    expect(logContent).not.toContain('worker-secret');
   });
 
   it('timeout with no output resolves as error', async () => {

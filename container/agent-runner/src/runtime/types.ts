@@ -43,7 +43,8 @@ export interface ContainerInput {
   };
   maintenancePurpose?: 'summary-memory';
   suppressConversationArchive?: boolean;
-  secrets?: Record<string, string>;
+  sdkSecrets?: Record<string, string>;
+  workerEnv?: Record<string, string>;
 }
 
 export interface TurnUsage {

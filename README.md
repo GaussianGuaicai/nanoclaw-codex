@@ -71,6 +71,34 @@ HOME_ASSISTANT_URL=https://your-home-assistant.example
 HASS_ACCESS_TOKEN=your-home-assistant-token
 ```
 
+Optional group-only worker env overrides live in a host-only config file:
+
+```text
+~/.config/nanoclaw/group-secrets.json
+```
+
+Example:
+
+```json
+{
+  "version": 1,
+  "groups": {
+    "example_group": {
+      "env": {
+        "HOME_ASSISTANT_URL": "https://ha.example",
+        "HASS_ACCESS_TOKEN": "..."
+      }
+    }
+  }
+}
+```
+
+These values are exposed only to worker sessions for the matching `group.folder`.
+For keys declared in that group's `env` map, worker resolution is:
+`group-secrets.json > project .env`.
+Host-side event sources and channel/service startup still use the global process
+environment and project `.env`.
+
 Optional structured model config (higher priority than legacy env):
 
 ```text

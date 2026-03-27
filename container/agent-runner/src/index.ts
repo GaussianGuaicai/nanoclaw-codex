@@ -20,6 +20,7 @@ import { fileURLToPath } from 'url';
 import { resolveMcpServerLaunch } from './mcp-launch.js';
 import { createAgentRuntime } from './runtime/index.js';
 import { ContainerInput, IpcInputMessage } from './runtime/types.js';
+import { buildWorkerEnvironments } from './worker-env.js';
 
 interface ContainerOutput {
   status: 'success' | 'error';
@@ -163,11 +164,11 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Build SDK env: merge secrets into process.env for the SDK only.
-  // Secrets never touch process.env itself, so Bash subprocesses can't see them.
-  const sdkEnv: Record<string, string | undefined> = { ...process.env };
-  for (const [key, value] of Object.entries(containerInput.secrets || {})) {
-    sdkEnv[key] = value;
+  // SDK-only secrets stay out of process.env; group worker env vars are exported
+  // into this worker process so tools, commands, and scripts can read them.
+  const { sdkEnv, workerProcessEnv } = buildWorkerEnvironments(containerInput);
+  for (const [key, value] of Object.entries(workerProcessEnv)) {
+    process.env[key] = value;
   }
 
   if (!containerInput.runtimePaths) {

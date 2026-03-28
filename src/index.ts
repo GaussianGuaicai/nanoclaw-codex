@@ -837,6 +837,11 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
+    reloadWebSocketSources: async () => {
+      if (webSocketSourceManager) {
+        await webSocketSourceManager.reload();
+      }
+    },
   });
   webSocketSourceManager = new WebSocketSourceManager({
     getRegisteredGroups: () => registeredGroups,

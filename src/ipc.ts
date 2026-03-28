@@ -1,8 +1,10 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 
 import { CronExpressionParser } from 'cron-parser';
 
+import { applyConfigUpdate, inspectConfigUpdate } from './config-mutations.js';
 import { agentExecutionConfigSchema } from './agent-config.js';
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
@@ -23,9 +25,50 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  reloadWebSocketSources?: () => Promise<void>;
+  writeTaskResponse?: (
+    groupFolder: string,
+    requestId: string,
+    response: Record<string, unknown>,
+  ) => void;
 }
 
 let ipcWatcherRunning = false;
+const CONFIG_PREVIEW_TTL_MS = 10 * 60 * 1000;
+const pendingConfigPreviews = new Map<
+  string,
+  { requestHash: string; expiresAt: number }
+>();
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableStringify(entry)).join(',')}]`;
+  }
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).sort(
+      ([a], [b]) => a.localeCompare(b),
+    );
+    return `{${entries
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableStringify(entry)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function buildConfigPreviewHash(payload: Record<string, unknown>): string {
+  return crypto
+    .createHash('sha256')
+    .update(stableStringify(payload))
+    .digest('hex');
+}
+
+function cleanupExpiredConfigPreviews(now = Date.now()): void {
+  for (const [token, entry] of pendingConfigPreviews.entries()) {
+    if (entry.expiresAt <= now) {
+      pendingConfigPreviews.delete(token);
+    }
+  }
+}
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -126,7 +169,26 @@ export function startIpcWatcher(deps: IpcDeps): void {
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               // Pass source group identity to processTaskIpc for authorization
-              await processTaskIpc(data, sourceGroup, isMain, deps);
+              await processTaskIpc(data, sourceGroup, isMain, {
+                ...deps,
+                writeTaskResponse:
+                  deps.writeTaskResponse ||
+                  ((groupFolder, requestId, response) => {
+                    const responsesDir = path.join(
+                      ipcBaseDir,
+                      groupFolder,
+                      'responses',
+                    );
+                    fs.mkdirSync(responsesDir, { recursive: true });
+                    const filePath = path.join(responsesDir, `${requestId}.json`);
+                    const tempPath = `${filePath}.tmp`;
+                    fs.writeFileSync(
+                      tempPath,
+                      `${JSON.stringify(response, null, 2)}\n`,
+                    );
+                    fs.renameSync(tempPath, filePath);
+                  }),
+              });
               fs.unlinkSync(filePath);
             } catch (err) {
               logger.error(
@@ -166,7 +228,17 @@ export async function processTaskIpc(
     agent_config?: unknown;
     groupFolder?: string;
     chatJid?: string;
+    target?: string;
     targetJid?: string;
+    subscriptionId?: string;
+    unsetPaths?: string[];
+    requestId?: string;
+    previewToken?: string;
+    dryRun?: boolean;
+    domain?: 'agent' | 'context' | 'websocket';
+    scope?: 'global' | 'group' | 'task' | 'subscription';
+    changes?: unknown;
+    reason?: string;
     // For register_group
     jid?: string;
     name?: string;
@@ -180,6 +252,10 @@ export async function processTaskIpc(
   deps: IpcDeps,
 ): Promise<void> {
   const registeredGroups = deps.registeredGroups();
+  const respond = (response: Record<string, unknown>): void => {
+    if (!data.requestId || !deps.writeTaskResponse) return;
+    deps.writeTaskResponse(sourceGroup, data.requestId, response);
+  };
 
   switch (data.type) {
     case 'schedule_task':
@@ -380,6 +456,26 @@ export async function processTaskIpc(
             | 'once';
         if (data.schedule_value !== undefined)
           updates.schedule_value = data.schedule_value;
+        if (data.agent_config !== undefined) {
+          const parsedAgentConfig = agentExecutionConfigSchema.safeParse(
+            data.agent_config,
+          );
+          if (!parsedAgentConfig.success) {
+            logger.warn(
+              {
+                taskId: data.taskId,
+                sourceGroup,
+                errors: parsedAgentConfig.error.issues.map((issue) => ({
+                  path: issue.path.join('.') || '<root>',
+                  message: issue.message,
+                })),
+              },
+              'Invalid task agent_config update rejected',
+            );
+            break;
+          }
+          updates.agent_config = parsedAgentConfig.data;
+        }
 
         // Recompute next_run if schedule changed
         if (data.schedule_type || data.schedule_value) {
@@ -414,6 +510,148 @@ export async function processTaskIpc(
           { taskId: data.taskId, sourceGroup, updates },
           'Task updated via IPC',
         );
+      }
+      break;
+
+    case 'inspect_config':
+      if (!data.domain || !data.scope || !data.changes) {
+        logger.warn(
+          { sourceGroup, data },
+          'Invalid inspect_config request - missing required fields',
+        );
+        respond({
+          ok: false,
+          message: 'Missing required inspect_config fields',
+        });
+        break;
+      }
+      {
+        const previewPayload = {
+          target: data.target,
+          domain: data.domain,
+          scope: data.scope,
+          changes: data.changes,
+          unsetPaths: data.unsetPaths,
+          reason: data.reason,
+          targetJid: data.targetJid,
+          taskId: data.taskId,
+          subscriptionId: data.subscriptionId,
+          actorGroup: sourceGroup,
+          isMain,
+        };
+        const result = await inspectConfigUpdate(previewPayload, {
+          registeredGroups: deps.registeredGroups,
+          reloadWebSocketSources: deps.reloadWebSocketSources,
+        });
+        if (result.ok) {
+          cleanupExpiredConfigPreviews();
+          const previewToken = crypto.randomUUID();
+          pendingConfigPreviews.set(previewToken, {
+            requestHash: buildConfigPreviewHash(previewPayload),
+            expiresAt: Date.now() + CONFIG_PREVIEW_TTL_MS,
+          });
+          respond({
+            ...result,
+            previewToken,
+            requiresConfirmation: true,
+            effectiveWhen:
+              result.reloadWebSockets === true
+                ? 'WebSocket subscriptions reload immediately for future events. Other changes apply to the next run.'
+                : 'This change applies to the next run and does not hot-switch the current worker.',
+          });
+        } else {
+          respond({ ...result });
+        }
+      }
+      break;
+
+    case 'apply_config_update':
+      if (!data.domain || !data.scope || !data.changes) {
+        logger.warn(
+          { sourceGroup, data },
+          'Invalid apply_config_update request - missing required fields',
+        );
+        respond({
+          ok: false,
+          message: 'Missing required apply_config_update fields',
+        });
+        break;
+      }
+      {
+        cleanupExpiredConfigPreviews();
+        if (!data.previewToken) {
+          logger.warn(
+            { sourceGroup, data },
+            'Config update rejected - missing preview token',
+          );
+          respond({
+            ok: false,
+            message: 'previewToken is required; call inspect_config first',
+          });
+          break;
+        }
+        const previewEntry = pendingConfigPreviews.get(data.previewToken);
+        if (!previewEntry) {
+          logger.warn(
+            { sourceGroup, previewToken: data.previewToken },
+            'Config update rejected - unknown or expired preview token',
+          );
+          respond({
+            ok: false,
+            message: 'Preview token is invalid or expired; run inspect_config again',
+          });
+          break;
+        }
+        const applyPayload = {
+          target: data.target,
+          domain: data.domain,
+          scope: data.scope,
+          changes: data.changes,
+          unsetPaths: data.unsetPaths,
+          reason: data.reason,
+          targetJid: data.targetJid,
+          taskId: data.taskId,
+          subscriptionId: data.subscriptionId,
+          actorGroup: sourceGroup,
+          isMain,
+        };
+        const requestHash = buildConfigPreviewHash(applyPayload);
+        if (previewEntry.requestHash !== requestHash) {
+          logger.warn(
+            { sourceGroup, previewToken: data.previewToken },
+            'Config update rejected - payload no longer matches preview',
+          );
+          respond({
+            ok: false,
+            message: 'Payload does not match the confirmed preview; run inspect_config again',
+          });
+          break;
+        }
+        const result = await applyConfigUpdate(
+          applyPayload,
+          {
+            registeredGroups: deps.registeredGroups,
+            reloadWebSocketSources: deps.reloadWebSocketSources,
+          },
+        );
+        pendingConfigPreviews.delete(data.previewToken);
+        respond({ ...result });
+
+        if (!result.ok) {
+          logger.warn(
+            { sourceGroup, result },
+            'Config update failed',
+          );
+        } else {
+          logger.info(
+            {
+              sourceGroup,
+              target: result.target,
+              reloadWebSockets: result.reloadWebSockets === true,
+            },
+            'Config update applied via IPC',
+          );
+        }
       }
       break;
 

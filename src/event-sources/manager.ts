@@ -150,6 +150,12 @@ export class WebSocketSourceManager {
     this.connections.clear();
   }
 
+  async reload(): Promise<void> {
+    await this.stop();
+    this.lastTriggeredAt.clear();
+    await this.start();
+  }
+
   private shouldTrigger(subscription: WebSocketSubscriptionConfig): boolean {
     const cooldownMs = subscription.cooldownMs;
     if (!cooldownMs || cooldownMs <= 0) return true;

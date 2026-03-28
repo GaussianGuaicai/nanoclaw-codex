@@ -36,9 +36,15 @@ const THIRD_GROUP: RegisteredGroup = {
 
 let groups: Record<string, RegisteredGroup>;
 let deps: IpcDeps;
+let taskResponses: Array<{
+  groupFolder: string;
+  requestId: string;
+  response: Record<string, unknown>;
+}>;
 
 beforeEach(() => {
   _initTestDatabase();
+  taskResponses = [];
 
   groups = {
     'main@g.us': MAIN_GROUP,
@@ -62,6 +68,9 @@ beforeEach(() => {
     syncGroups: async () => {},
     getAvailableGroups: () => [],
     writeGroupsSnapshot: () => {},
+    writeTaskResponse: (groupFolder, requestId, response) => {
+      taskResponses.push({ groupFolder, requestId, response });
+    },
   };
 });
 
@@ -251,6 +260,134 @@ describe('resume_task authorization', () => {
       deps,
     );
     expect(getTaskById('task-paused')!.status).toBe('paused');
+  });
+});
+
+describe('config update confirmation flow', () => {
+  it('rejects apply_config_update without a preview token', async () => {
+    await processTaskIpc(
+      {
+        type: 'apply_config_update',
+        requestId: 'apply-1',
+        domain: 'context',
+        scope: 'global',
+        changes: {
+          enabled: true,
+        },
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    expect(taskResponses).toHaveLength(1);
+    expect(taskResponses[0].response).toMatchObject({
+      ok: false,
+    });
+  });
+
+  it('requires inspect_config before apply_config_update', async () => {
+    await processTaskIpc(
+      {
+        type: 'inspect_config',
+        requestId: 'inspect-1',
+        domain: 'agent',
+        scope: 'group',
+        targetJid: 'other@g.us',
+        changes: {
+          defaults: {
+            model: 'gpt-5.4-mini',
+          },
+        },
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    const previewResponse = taskResponses.at(-1)?.response;
+    expect(previewResponse).toMatchObject({
+      ok: true,
+      target: 'agent/group:other@g.us',
+    });
+    const previewToken = previewResponse?.previewToken;
+    expect(typeof previewToken).toBe('string');
+
+    await processTaskIpc(
+      {
+        type: 'apply_config_update',
+        requestId: 'apply-2',
+        previewToken: previewToken as string,
+        domain: 'agent',
+        scope: 'group',
+        targetJid: 'other@g.us',
+        changes: {
+          defaults: {
+            model: 'gpt-5.4-mini',
+          },
+        },
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    expect(taskResponses.at(-1)?.response).toMatchObject({
+      ok: true,
+      target: 'agent/group:other@g.us',
+    });
+    expect(getRegisteredGroup('other@g.us')?.containerConfig?.agentConfig).toEqual({
+      defaults: {
+        model: 'gpt-5.4-mini',
+      },
+    });
+  });
+
+  it('supports the unified target field in the confirmation flow', async () => {
+    await processTaskIpc(
+      {
+        type: 'inspect_config',
+        requestId: 'inspect-target',
+        target: 'agent/group:other@g.us',
+        domain: 'agent',
+        scope: 'group',
+        changes: {
+          defaults: {
+            reasoningEffort: 'low',
+          },
+        },
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    const previewToken = taskResponses.at(-1)?.response.previewToken;
+    expect(typeof previewToken).toBe('string');
+
+    await processTaskIpc(
+      {
+        type: 'apply_config_update',
+        requestId: 'apply-target',
+        previewToken: previewToken as string,
+        target: 'agent/group:other@g.us',
+        domain: 'agent',
+        scope: 'group',
+        changes: {
+          defaults: {
+            reasoningEffort: 'low',
+          },
+        },
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    expect(taskResponses.at(-1)?.response).toMatchObject({
+      ok: true,
+      target: 'agent/group:other@g.us',
+    });
   });
 });
 

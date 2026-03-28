@@ -17,6 +17,7 @@ if (!IPC_DIR) {
 }
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+const RESPONSES_DIR = path.join(IPC_DIR, 'responses');
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
@@ -37,6 +38,23 @@ const agentConfigSchema = z
   })
   .optional();
 
+const configMutationShape = {
+  target: z.string().optional(),
+  domain: z.enum(['agent', 'context', 'websocket']),
+  scope: z.enum(['global', 'group', 'task', 'subscription']),
+  changes: z.object({}).passthrough(),
+  unset_paths: z.array(z.string().min(1)).optional(),
+  reason: z.string().optional(),
+  target_jid: z.string().optional(),
+  task_id: z.string().optional(),
+  subscription_id: z.string().optional(),
+  dry_run: z.boolean().optional(),
+  preview_token: z.string().optional(),
+};
+
+const configMutationSchema = z.object(configMutationShape);
+type ConfigMutationArgs = z.infer<typeof configMutationSchema>;
+
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
 
@@ -49,6 +67,49 @@ function writeIpcFile(dir: string, data: object): string {
   fs.renameSync(tempPath, filepath);
 
   return filename;
+}
+
+async function waitForTaskResponse(requestId: string): Promise<Record<string, unknown>> {
+  fs.mkdirSync(RESPONSES_DIR, { recursive: true });
+  const responsePath = path.join(RESPONSES_DIR, `${requestId}.json`);
+  const deadline = Date.now() + 15_000;
+
+  while (Date.now() < deadline) {
+    if (fs.existsSync(responsePath)) {
+      const raw = fs.readFileSync(responsePath, 'utf-8');
+      fs.unlinkSync(responsePath);
+      return JSON.parse(raw) as Record<string, unknown>;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error('Timed out waiting for host config response');
+}
+
+function formatHostConfigResponse(response: Record<string, unknown>): string {
+  if (response.ok !== true) {
+    return `Configuration request failed: ${String(response.message || 'unknown error')}`;
+  }
+
+  const lines = [
+    `Target: ${String(response.target || '(unknown)')}`,
+    `Status: ${String(response.message || 'ok')}`,
+  ];
+
+  if (response.before !== undefined) {
+    lines.push(`Before: ${JSON.stringify(response.before, null, 2)}`);
+  }
+  if (response.after !== undefined) {
+    lines.push(`After: ${JSON.stringify(response.after, null, 2)}`);
+  }
+  if (typeof response.effectiveWhen === 'string') {
+    lines.push(`Effective: ${response.effectiveWhen}`);
+  }
+  if (typeof response.previewToken === 'string') {
+    lines.push(`Preview token: ${response.previewToken}`);
+  }
+
+  return lines.join('\n');
 }
 
 const server = new McpServer({
@@ -267,6 +328,77 @@ server.tool(
 );
 
 server.tool(
+  'inspect_config',
+  'Preview a configuration update without writing anything. Use this to confirm the exact target and patch before calling apply_config_update.',
+  configMutationShape,
+  async (args) => {
+    const requestId = `cfg-preview-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    return {
+      content: [{
+        type: 'text' as const,
+        text: await (async () => {
+          writeIpcFile(TASKS_DIR, {
+            type: 'inspect_config',
+            requestId,
+            dryRun: true,
+            target: args.target,
+            domain: args.domain,
+            scope: args.scope,
+            changes: args.changes,
+            unsetPaths: args.unset_paths,
+            reason: args.reason,
+            targetJid: args.target_jid,
+            taskId: args.task_id,
+            subscriptionId: args.subscription_id,
+            groupFolder,
+            isMain,
+            timestamp: new Date().toISOString(),
+          });
+          const response = await waitForTaskResponse(requestId);
+          return formatHostConfigResponse(response);
+        })(),
+      }],
+    };
+  },
+);
+
+server.tool(
+  'apply_config_update',
+  'Request a persistent configuration update. This writes a host-side update request that the NanoClaw host will validate and apply.',
+  configMutationShape,
+  async (args) => {
+    const requestId = `cfg-apply-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    writeIpcFile(TASKS_DIR, {
+      type: 'apply_config_update',
+      requestId,
+      dryRun: false,
+      previewToken: args.preview_token,
+      target: args.target,
+      domain: args.domain,
+      scope: args.scope,
+      changes: args.changes,
+      unsetPaths: args.unset_paths,
+      reason: args.reason,
+      targetJid: args.target_jid,
+      taskId: args.task_id,
+      subscriptionId: args.subscription_id,
+      groupFolder,
+      isMain,
+      timestamp: new Date().toISOString(),
+    });
+    const response = await waitForTaskResponse(requestId);
+
+    return {
+      content: [{
+        type: 'text' as const,
+        text: formatHostConfigResponse(response),
+      }],
+      ...(response.ok === true ? {} : { isError: true }),
+    };
+  },
+);
+
+server.tool(
   'update_task',
   'Update an existing scheduled task. Only provided fields are changed; omitted fields stay the same.',
   {
@@ -274,6 +406,7 @@ server.tool(
     prompt: z.string().optional().describe('New prompt for the task'),
     schedule_type: z.enum(['cron', 'interval', 'once']).optional().describe('New schedule type'),
     schedule_value: z.string().optional().describe('New schedule value (see schedule_task for format)'),
+    agent_config: agentConfigSchema.describe('Optional per-task model configuration override (model, reasoningEffort, codexConfigOverrides).'),
   },
   async (args) => {
     // Validate schedule_value if provided
@@ -299,16 +432,17 @@ server.tool(
       }
     }
 
-    const data: Record<string, string | undefined> = {
+    const data: Record<string, unknown> = {
       type: 'update_task',
       taskId: args.task_id,
       groupFolder,
-      isMain: String(isMain),
+      isMain,
       timestamp: new Date().toISOString(),
     };
     if (args.prompt !== undefined) data.prompt = args.prompt;
     if (args.schedule_type !== undefined) data.schedule_type = args.schedule_type;
     if (args.schedule_value !== undefined) data.schedule_value = args.schedule_value;
+    if (args.agent_config !== undefined) data.agent_config = args.agent_config;
 
     writeIpcFile(TASKS_DIR, data);
 

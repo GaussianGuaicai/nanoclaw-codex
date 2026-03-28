@@ -336,7 +336,9 @@ describe('config update confirmation flow', () => {
       ok: true,
       target: 'agent/group:other@g.us',
     });
-    expect(getRegisteredGroup('other@g.us')?.containerConfig?.agentConfig).toEqual({
+    expect(
+      getRegisteredGroup('other@g.us')?.containerConfig?.agentConfig,
+    ).toEqual({
       defaults: {
         model: 'gpt-5.4-mini',
       },

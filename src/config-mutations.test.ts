@@ -25,7 +25,8 @@ vi.mock('./env.js', () => ({
 }));
 
 vi.mock('./config.js', async () => {
-  const actual = await vi.importActual<typeof import('./config.js')>('./config.js');
+  const actual =
+    await vi.importActual<typeof import('./config.js')>('./config.js');
   return {
     ...actual,
     ASSISTANT_NAME: 'Andy',
@@ -139,14 +140,16 @@ describe('config mutations', () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(JSON.parse(fs.readFileSync(paths.agentConfigPath, 'utf-8'))).toEqual({
-      defaults: {
-        reasoningEffort: 'high',
-        codexConfigOverrides: {
-          global_flag: true,
+    expect(JSON.parse(fs.readFileSync(paths.agentConfigPath, 'utf-8'))).toEqual(
+      {
+        defaults: {
+          reasoningEffort: 'high',
+          codexConfigOverrides: {
+            global_flag: true,
+          },
         },
       },
-    });
+    );
 
     const resolved = resolveAgentExecutionConfig({ source: 'chat' });
     expect(resolved).toEqual({
@@ -180,12 +183,16 @@ describe('config mutations', () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(registeredGroups['other@g.us'].containerConfig?.agentConfig).toEqual({
-      defaults: {
-        model: 'gpt-5.4-mini',
+    expect(registeredGroups['other@g.us'].containerConfig?.agentConfig).toEqual(
+      {
+        defaults: {
+          model: 'gpt-5.4-mini',
+        },
       },
-    });
-    expect(getRegisteredGroup('other@g.us')?.containerConfig?.agentConfig).toEqual({
+    );
+    expect(
+      getRegisteredGroup('other@g.us')?.containerConfig?.agentConfig,
+    ).toEqual({
       defaults: {
         model: 'gpt-5.4-mini',
       },
@@ -267,31 +274,31 @@ describe('config mutations', () => {
 
     expect(result.ok).toBe(true);
     expect(deps.reloadWebSocketSources).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(fs.readFileSync(paths.websocketSourcesPath, 'utf-8'))).toEqual(
-      {
-        connections: {
-          ha_main: {
-            provider: 'home_assistant',
-            urlEnvVar: 'TEST_HA_URL',
-            tokenEnvVar: 'TEST_HA_TOKEN',
+    expect(
+      JSON.parse(fs.readFileSync(paths.websocketSourcesPath, 'utf-8')),
+    ).toEqual({
+      connections: {
+        ha_main: {
+          provider: 'home_assistant',
+          urlEnvVar: 'TEST_HA_URL',
+          tokenEnvVar: 'TEST_HA_TOKEN',
+        },
+      },
+      subscriptions: [
+        {
+          id: 'front-door',
+          connection: 'ha_main',
+          kind: 'events',
+          eventType: 'state_changed',
+          targetJid: 'main@g.us',
+          promptTemplate: 'Handle {{event_type}}',
+          cooldownMs: 5000,
+          agentConfig: {
+            reasoningEffort: 'medium',
           },
         },
-        subscriptions: [
-          {
-            id: 'front-door',
-            connection: 'ha_main',
-            kind: 'events',
-            eventType: 'state_changed',
-            targetJid: 'main@g.us',
-            promptTemplate: 'Handle {{event_type}}',
-            cooldownMs: 5000,
-            agentConfig: {
-              reasoningEffort: 'medium',
-            },
-          },
-        ],
-      },
-    );
+      ],
+    });
   });
 
   it('rejects global context updates from non-main groups', async () => {
@@ -387,11 +394,13 @@ describe('config mutations', () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(JSON.parse(fs.readFileSync(paths.websocketSourcesPath, 'utf-8')).subscriptions[0])
-      .toMatchObject({
-        id: 'front-door',
-        deliverOutput: true,
-      });
+    expect(
+      JSON.parse(fs.readFileSync(paths.websocketSourcesPath, 'utf-8'))
+        .subscriptions[0],
+    ).toMatchObject({
+      id: 'front-door',
+      deliverOutput: true,
+    });
   });
 
   it('supports unsetPaths during deep-merge updates', async () => {

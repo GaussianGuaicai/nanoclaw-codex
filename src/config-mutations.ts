@@ -9,13 +9,18 @@ import {
   resetGlobalAgentConfigCache,
   agentExecutionSourceConfigSchema,
 } from './agent-config.js';
-import { AGENT_CONFIG_PATH, CONTEXT_CONFIG_PATH, LOGS_DIR, WEBSOCKET_SOURCES_PATH } from './config.js';
-import { parseContextConfig, getDefaultContextConfig, resetContextConfigCache } from './context-config.js';
 import {
-  getTaskById,
-  setRegisteredGroup,
-  updateTask,
-} from './db.js';
+  AGENT_CONFIG_PATH,
+  CONTEXT_CONFIG_PATH,
+  LOGS_DIR,
+  WEBSOCKET_SOURCES_PATH,
+} from './config.js';
+import {
+  parseContextConfig,
+  getDefaultContextConfig,
+  resetContextConfigCache,
+} from './context-config.js';
+import { getTaskById, setRegisteredGroup, updateTask } from './db.js';
 import { logger } from './logger.js';
 import { formatLocalIsoTimestamp } from './time.js';
 import { agentExecutionConfigSchema } from './agent-config.js';
@@ -231,7 +236,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function normalizeRequestTarget(request: ConfigMutationRequest): ConfigMutationRequest {
+function normalizeRequestTarget(
+  request: ConfigMutationRequest,
+): ConfigMutationRequest {
   if (!request.target) return request;
 
   const [domainScope, identifier] = request.target.split(':', 2);
@@ -276,7 +283,9 @@ function applyUnsetPaths<T>(value: T, unsetPaths?: string[]): T {
     }
     const segments = unsetPath.split('.');
     if (segments.some((segment) => !segment || /^\d+$/.test(segment))) {
-      throw new Error(`unsetPaths does not support array indices: ${unsetPath}`);
+      throw new Error(
+        `unsetPaths does not support array indices: ${unsetPath}`,
+      );
     }
 
     let cursor: Record<string, unknown> | undefined = clone;
@@ -297,7 +306,7 @@ function applyUnsetPaths<T>(value: T, unsetPaths?: string[]): T {
 
 function deepMerge<T>(base: T, patch: unknown): T {
   if (!isPlainObject(base) || !isPlainObject(patch)) {
-    return (patch === undefined ? base : (patch as T));
+    return patch === undefined ? base : (patch as T);
   }
 
   const result: Record<string, unknown> = { ...base };
@@ -358,32 +367,46 @@ function validateAgentPatch(
   if (request.domain !== 'agent') return null;
 
   if (request.scope === 'global' || request.scope === 'group') {
-    const parsed = agentExecutionSourceConfigPatchSchema.safeParse(request.changes);
+    const parsed = agentExecutionSourceConfigPatchSchema.safeParse(
+      request.changes,
+    );
     if (!parsed.success) {
-      throw new Error(parsed.error.issues.map((issue) => issue.message).join('; '));
+      throw new Error(
+        parsed.error.issues.map((issue) => issue.message).join('; '),
+      );
     }
     return parsed.data;
   }
 
   const parsed = agentExecutionConfigPatchSchema.safeParse(request.changes);
   if (!parsed.success) {
-    throw new Error(parsed.error.issues.map((issue) => issue.message).join('; '));
+    throw new Error(
+      parsed.error.issues.map((issue) => issue.message).join('; '),
+    );
   }
   return parsed.data;
 }
 
-function validateContextPatch(request: ConfigMutationRequest): Record<string, unknown> {
+function validateContextPatch(
+  request: ConfigMutationRequest,
+): Record<string, unknown> {
   const parsed = contextConfigPatchSchema.safeParse(request.changes);
   if (!parsed.success) {
-    throw new Error(parsed.error.issues.map((issue) => issue.message).join('; '));
+    throw new Error(
+      parsed.error.issues.map((issue) => issue.message).join('; '),
+    );
   }
   return parsed.data;
 }
 
-function validateWebSocketPatch(request: ConfigMutationRequest): Record<string, unknown> {
+function validateWebSocketPatch(
+  request: ConfigMutationRequest,
+): Record<string, unknown> {
   const parsed = websocketSubscriptionPatchSchema.safeParse(request.changes);
   if (!parsed.success) {
-    throw new Error(parsed.error.issues.map((issue) => issue.message).join('; '));
+    throw new Error(
+      parsed.error.issues.map((issue) => issue.message).join('; '),
+    );
   }
   return parsed.data;
 }
@@ -397,7 +420,9 @@ function authorizeGlobal(request: ConfigMutationRequest): void {
 function validateAgentConfig(value: unknown): AgentExecutionConfig {
   const parsed = agentExecutionConfigSchema.safeParse(value);
   if (!parsed.success) {
-    throw new Error(parsed.error.issues.map((issue) => issue.message).join('; '));
+    throw new Error(
+      parsed.error.issues.map((issue) => issue.message).join('; '),
+    );
   }
   return parsed.data;
 }
@@ -405,7 +430,9 @@ function validateAgentConfig(value: unknown): AgentExecutionConfig {
 function validateAgentSourceConfig(value: unknown): AgentExecutionSourceConfig {
   const parsed = agentExecutionSourceConfigSchema.safeParse(value);
   if (!parsed.success) {
-    throw new Error(parsed.error.issues.map((issue) => issue.message).join('; '));
+    throw new Error(
+      parsed.error.issues.map((issue) => issue.message).join('; '),
+    );
   }
   return parsed.data;
 }
@@ -455,7 +482,9 @@ function requireWebSocketSubscription(
   });
 
   if (!subscription || !isPlainObject(subscription)) {
-    throw new Error(`Unknown websocket subscription: ${request.subscriptionId}`);
+    throw new Error(
+      `Unknown websocket subscription: ${request.subscriptionId}`,
+    );
   }
 
   const parsed = websocketSubscriptionBaseSchema.safeParse(subscription);
@@ -516,8 +545,8 @@ async function prepareConfigMutation(
         : undefined;
       const merged = applyUnsetPaths(
         mergeAgentExecutionSourceConfig(
-        current,
-        patch as AgentExecutionSourceConfig,
+          current,
+          patch as AgentExecutionSourceConfig,
         ),
         normalizedRequest.unsetPaths,
       );
@@ -617,7 +646,9 @@ async function prepareConfigMutation(
 
   if (normalizedRequest.domain === 'websocket') {
     if (normalizedRequest.scope !== 'subscription') {
-      throw new Error('WebSocket config updates only support subscription scope');
+      throw new Error(
+        'WebSocket config updates only support subscription scope',
+      );
     }
     authorizeGlobal(normalizedRequest);
     const patch = validateWebSocketPatch(normalizedRequest);

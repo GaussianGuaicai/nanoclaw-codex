@@ -105,7 +105,10 @@ export function mergeAgentExecutionSourceConfig(
   const merged: AgentExecutionSourceConfig = { ...(base || {}) };
 
   if (next.defaults !== undefined) {
-    merged.defaults = mergeAgentExecutionConfig(base?.defaults || {}, next.defaults);
+    merged.defaults = mergeAgentExecutionConfig(
+      base?.defaults || {},
+      next.defaults,
+    );
   }
 
   if (next.bySource !== undefined) {
@@ -292,7 +295,10 @@ export function resolveAgentExecutionConfig(
   let resolved: AgentExecutionConfig = {};
   resolved = mergeAgentExecutionConfig(resolved, readLegacyDefaults());
   resolved = applySourceLayer(resolved, options.source, globalState.config);
-  resolved = mergeAgentExecutionConfig(resolved, sourceDefaults[options.source]);
+  resolved = mergeAgentExecutionConfig(
+    resolved,
+    sourceDefaults[options.source],
+  );
   resolved = applySourceLayer(resolved, options.source, groupLayer.value);
   resolved = mergeAgentExecutionConfig(resolved, websocketOverride.value);
   resolved = mergeAgentExecutionConfig(resolved, taskOverride.value);

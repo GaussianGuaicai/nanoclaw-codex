@@ -180,7 +180,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
                       'responses',
                     );
                     fs.mkdirSync(responsesDir, { recursive: true });
-                    const filePath = path.join(responsesDir, `${requestId}.json`);
+                    const filePath = path.join(
+                      responsesDir,
+                      `${requestId}.json`,
+                    );
                     const tempPath = `${filePath}.tmp`;
                     fs.writeFileSync(
                       tempPath,
@@ -598,7 +601,8 @@ export async function processTaskIpc(
           );
           respond({
             ok: false,
-            message: 'Preview token is invalid or expired; run inspect_config again',
+            message:
+              'Preview token is invalid or expired; run inspect_config again',
           });
           break;
         }
@@ -623,25 +627,20 @@ export async function processTaskIpc(
           );
           respond({
             ok: false,
-            message: 'Payload does not match the confirmed preview; run inspect_config again',
+            message:
+              'Payload does not match the confirmed preview; run inspect_config again',
           });
           break;
         }
-        const result = await applyConfigUpdate(
-          applyPayload,
-          {
-            registeredGroups: deps.registeredGroups,
-            reloadWebSocketSources: deps.reloadWebSocketSources,
-          },
-        );
+        const result = await applyConfigUpdate(applyPayload, {
+          registeredGroups: deps.registeredGroups,
+          reloadWebSocketSources: deps.reloadWebSocketSources,
+        });
         pendingConfigPreviews.delete(data.previewToken);
         respond({ ...result });
 
         if (!result.ok) {
-          logger.warn(
-            { sourceGroup, result },
-            'Config update failed',
-          );
+          logger.warn({ sourceGroup, result }, 'Config update failed');
         } else {
           logger.info(
             {

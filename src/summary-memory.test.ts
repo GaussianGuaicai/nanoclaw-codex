@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   buildSummaryUpdatePrompt,
+  cleanSummaryMemoryAgainstSharedInstructions,
   getDefaultSummaryYaml,
   parseSummaryMemoryYaml,
   stripYamlFences,
@@ -105,5 +106,77 @@ describe('summary-memory', () => {
     ).rejects.toThrow('network down');
 
     expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes shared-instruction duplicates and generic prompt rules', () => {
+    const cleaned = cleanSummaryMemoryAgainstSharedInstructions({
+      doc: parseSummaryMemoryYaml(
+        [
+          'session_state:',
+          '  task: "Track preferences"',
+          '  decisions:',
+          '    - When Gaussian arrives home, mention that the computer is usually already opened automatically, but do not trigger anything yourself.',
+          '    - Return YAML only.',
+          '    - Keep the living room comfortable.',
+          '  constraints:',
+          '    - Do not use markdown fences.',
+          '  active_entities: []',
+          '  open_questions: []',
+          '  important_paths: []',
+          '  recent_failures: []',
+          '  user_preferences:',
+          '    - Treat `Gaussian-WiFi*` as home Wi-Fi.',
+          '    - Gaussian prefers terse status updates.',
+        ].join('\n'),
+        10,
+      ),
+      sharedInstructionTexts: [
+        [
+          '- Treat `Gaussian-WiFi*` as home Wi-Fi.',
+          '- When Gaussian arrives home, mention that the computer is usually already opened automatically, but do not trigger anything yourself.',
+        ].join('\n'),
+      ],
+      maxItemsPerList: 10,
+    });
+
+    expect(cleaned.session_state.decisions).toEqual([
+      'Keep the living room comfortable.',
+    ]);
+    expect(cleaned.session_state.constraints).toEqual([]);
+    expect(cleaned.session_state.user_preferences).toEqual([
+      'Gaussian prefers terse status updates.',
+    ]);
+  });
+
+  it('cleans duplicates against shared instructions after update', async () => {
+    const updated = await updateSummaryMemory({
+      currentSummaryYaml: getDefaultSummaryYaml(),
+      deltaTurns: [],
+      sharedInstructionTexts: ['- Treat `Gaussian-WiFi*` as home Wi-Fi.'],
+      config: {
+        enabled: true,
+        model: 'gpt-5.4-mini',
+        reasoningEffort: 'low',
+        updateMinTurns: 2,
+        maxItemsPerList: 4,
+      },
+      invoke: async () =>
+        [
+          'session_state:',
+          '  task: "Track state"',
+          '  decisions: []',
+          '  constraints: []',
+          '  active_entities: []',
+          '  open_questions: []',
+          '  important_paths: []',
+          '  recent_failures: []',
+          '  user_preferences:',
+          '    - Treat `Gaussian-WiFi*` as home Wi-Fi.',
+          '    - Prefer short updates.',
+        ].join('\n'),
+    });
+
+    expect(updated.yaml).not.toContain('Treat `Gaussian-WiFi*` as home Wi-Fi.');
+    expect(updated.yaml).toContain('Prefer short updates.');
   });
 });

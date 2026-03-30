@@ -45,9 +45,15 @@ const {
     prepareContextSessionForTurn: vi.fn(
       (params: { sessionId?: string }) => params.sessionId,
     ),
-    buildPromptWithBootstrap: vi.fn(
-      (params: { prompt: string }) => params.prompt,
-    ),
+    getPromptWithBootstrapDetails: vi.fn((params: { prompt: string }) => ({
+      prompt: params.prompt,
+      contextDebug: {
+        bootstrapUsed: true,
+        summaryIncluded: true,
+        recentTurnsScope: 'shared',
+        recentTurnCount: 0,
+      },
+    })),
     recordCompletedContextTurn: vi.fn(async () => {}),
   },
 }));
@@ -208,9 +214,15 @@ describe('runSingleTurnAgentTask', () => {
         },
       },
     });
-    contextRuntimeMock.buildPromptWithBootstrap.mockReturnValueOnce(
-      'bootstrapped prompt',
-    );
+    contextRuntimeMock.getPromptWithBootstrapDetails.mockReturnValueOnce({
+      prompt: 'bootstrapped prompt',
+      contextDebug: {
+        bootstrapUsed: true,
+        summaryIncluded: true,
+        recentTurnsScope: 'shared',
+        recentTurnCount: 0,
+      },
+    });
     runContainerAgentMock.mockResolvedValue({
       status: 'success',
       result: 'ok',
@@ -235,7 +247,9 @@ describe('runSingleTurnAgentTask', () => {
       },
     );
 
-    expect(contextRuntimeMock.buildPromptWithBootstrap).toHaveBeenCalledWith(
+    expect(
+      contextRuntimeMock.getPromptWithBootstrapDetails,
+    ).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: 'ping',
         sessionId: undefined,
@@ -317,7 +331,9 @@ describe('runSingleTurnAgentTask', () => {
         sessionId: 'oversized-session',
       }),
     );
-    expect(contextRuntimeMock.buildPromptWithBootstrap).toHaveBeenCalledWith(
+    expect(
+      contextRuntimeMock.getPromptWithBootstrapDetails,
+    ).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: undefined,
       }),

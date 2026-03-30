@@ -32,6 +32,9 @@ describe('context-bootstrap', () => {
 
     expect(prompt).toContain('CONTEXT_BUNDLE');
     expect(prompt).toContain('CONTEXT_RULES:');
+    expect(prompt).toContain(
+      'Shared instruction files such as preferences.md, AGENTS.md, and CLAUDE.md outrank STRUCTURED_SUMMARY_YAML, RECENT_TURNS, and any implicit session background when they conflict.',
+    );
     expect(prompt).toContain('STRUCTURED_SUMMARY_YAML:');
     expect(prompt).toContain('RECENT_TURNS:');
     expect(prompt).toContain('CURRENT_INPUT:');

@@ -19,6 +19,10 @@ import { resolveGroupWorkerEnv } from './group-secrets.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import {
+  dedupeInstructionPaths,
+  findInstructionFiles,
+} from './shared-instructions.js';
+import {
   formatLocalIsoTimestamp,
   formatLocalTimestampForFilename,
 } from './time.js';
@@ -59,6 +63,12 @@ export interface ContainerInput {
   workerLogDetail?: {
     includePrompt?: boolean;
     includeResult?: boolean;
+  };
+  contextDebug?: {
+    bootstrapUsed: boolean;
+    summaryIncluded: boolean;
+    recentTurnsScope: 'shared' | 'source-only' | 'none';
+    recentTurnCount: number;
   };
   maintenancePurpose?: 'summary-memory';
   suppressConversationArchive?: boolean;
@@ -276,6 +286,30 @@ function redactWorkerInputForLogging(input: ContainerInput): ContainerInput {
   };
 }
 
+function buildContextLogLines(input: ContainerInput): string[] {
+  if (!input.contextDebug) {
+    return [
+      '=== Context Summary ===',
+      'Bootstrap Used: unknown',
+      'Summary Included: unknown',
+      'Recent Turns Scope: unknown',
+      'Recent Turn Count: unknown',
+      'Rule Priority: CURRENT_INPUT > Shared Instructions > Structured Summary > Recent Turns > Session Background',
+      '',
+    ];
+  }
+
+  return [
+    '=== Context Summary ===',
+    `Bootstrap Used: ${input.contextDebug.bootstrapUsed}`,
+    `Summary Included: ${input.contextDebug.summaryIncluded}`,
+    `Recent Turns Scope: ${input.contextDebug.recentTurnsScope}`,
+    `Recent Turn Count: ${input.contextDebug.recentTurnCount}`,
+    'Rule Priority: CURRENT_INPUT > Shared Instructions > Structured Summary > Recent Turns > Session Background',
+    '',
+  ];
+}
+
 function ensureGroupRuntimeDirs(groupFolder: string): {
   codexHome: string;
   ipcPath: string;
@@ -332,46 +366,7 @@ function copySnapshot(
 }
 
 function dedupePaths(paths: string[]): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-
-  for (const value of paths) {
-    const resolved = path.resolve(value);
-    if (seen.has(resolved)) continue;
-    seen.add(resolved);
-    result.push(resolved);
-  }
-
-  return result;
-}
-
-function findInstructionFiles(rootPath: string): string[] {
-  const filenames = ['AGENTS.md', 'CLAUDE.md', 'preferences.md'];
-  const nestedRoot = path.join(rootPath, 'groups', path.basename(rootPath));
-  const rootCandidates = filenames.map((filename) =>
-    path.join(rootPath, filename),
-  );
-  const legacyCandidates = filenames
-    .map((filename) => {
-      const rootCandidate = path.join(rootPath, filename);
-      const legacyCandidate = path.join(nestedRoot, filename);
-      if (fs.existsSync(rootCandidate)) {
-        return null;
-      }
-      return legacyCandidate;
-    })
-    .filter((candidate): candidate is string => candidate !== null);
-  const candidates = [...rootCandidates, ...legacyCandidates];
-
-  const files: string[] = [];
-  for (const candidate of candidates) {
-    if (!fs.existsSync(candidate)) continue;
-    const content = fs.readFileSync(candidate, 'utf-8').trim();
-    if (!content) continue;
-    files.push(candidate);
-  }
-
-  return files;
+  return dedupeInstructionPaths(paths);
 }
 
 function resolveSnapshotTarget(
@@ -809,6 +804,7 @@ export async function runContainerAgent(
           `Prompt length: ${input.prompt.length} chars`,
           `Session ID: ${input.sessionId || 'new'}`,
           '',
+          ...buildContextLogLines(input),
           '=== Additional Directories ===',
           layout.additionalDirectories.join('\n') || '(none)',
           '',

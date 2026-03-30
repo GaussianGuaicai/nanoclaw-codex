@@ -297,6 +297,12 @@ describe('container-runner worker execution', () => {
           includePrompt: true,
           includeResult: true,
         },
+        contextDebug: {
+          bootstrapUsed: true,
+          summaryIncluded: true,
+          recentTurnsScope: 'source-only',
+          recentTurnCount: 3,
+        },
       },
       () => {},
       async () => {},
@@ -328,6 +334,14 @@ describe('container-runner worker execution', () => {
       /Timestamp: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}/,
     );
     expect(logWrite?.[1]).toContain('=== Shared Instructions ===');
+    expect(logWrite?.[1]).toContain('=== Context Summary ===');
+    expect(logWrite?.[1]).toContain('Bootstrap Used: true');
+    expect(logWrite?.[1]).toContain('Summary Included: true');
+    expect(logWrite?.[1]).toContain('Recent Turns Scope: source-only');
+    expect(logWrite?.[1]).toContain('Recent Turn Count: 3');
+    expect(logWrite?.[1]).toContain(
+      'Rule Priority: CURRENT_INPUT > Shared Instructions > Structured Summary > Recent Turns > Session Background',
+    );
     expect(logWrite?.[1]).toContain(
       '/tmp/nanoclaw-test-groups/test-group/preferences.md',
     );

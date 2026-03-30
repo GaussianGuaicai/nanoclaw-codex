@@ -27,6 +27,7 @@ import {
 import {
   buildLiveSessionKey,
   buildPromptWithBootstrap,
+  getPromptWithBootstrapDetails,
   isContextSourceEnabled,
   prepareContextSessionForTurn,
   recordCompletedContextTurn,
@@ -179,6 +180,9 @@ describe('buildPromptWithBootstrap', () => {
     });
 
     expect(prompt).toContain('CURRENT_INPUT is the task to execute now');
+    expect(prompt).toContain(
+      'Shared instruction files such as preferences.md, AGENTS.md, and CLAUDE.md outrank STRUCTURED_SUMMARY_YAML, RECENT_TURNS, and any implicit session background when they conflict.',
+    );
     expect(prompt).toContain('source `scheduled`');
     expect(prompt).toContain('Scheduled task should run the target action.');
     expect(prompt).not.toContain('Chat asked about recent device events.');
@@ -215,6 +219,34 @@ describe('buildPromptWithBootstrap', () => {
     expect(prompt).toContain('may include multiple sources');
     expect(prompt).toContain('Chat asked about recent device events.');
     expect(prompt).toContain('Realtime event was notify-only.');
+  });
+
+  it('returns bootstrap metadata for worker logging', () => {
+    loadContextConfigMock.mockReturnValue(baseConfig);
+
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'chat:test-room',
+      source: 'chat',
+      role: 'user',
+      content: 'Chat asked about recent device events.',
+      created_at: '2026-03-25T13:57:11.000Z',
+      est_tokens: 10,
+    });
+
+    const result = getPromptWithBootstrapDetails({
+      groupFolder: testGroup.folder,
+      source: 'chat',
+      prompt: 'Answer the user.',
+    });
+
+    expect(result.contextDebug).toEqual({
+      bootstrapUsed: true,
+      summaryIncluded: true,
+      recentTurnsScope: 'shared',
+      recentTurnCount: 1,
+    });
+    expect(result.prompt).toContain('CURRENT_INPUT:');
   });
 });
 
@@ -277,6 +309,11 @@ describe('recordCompletedContextTurn', () => {
     expect(turns.map((turn) => turn.role)).toEqual(['user', 'assistant']);
     expect(updateSummaryMemoryMock).toHaveBeenCalledTimes(1);
     expect(updateSummaryMemoryMock.mock.calls[0][0].deltaTurns).toHaveLength(2);
+    expect(
+      updateSummaryMemoryMock.mock.calls[0][0].sharedInstructionTexts,
+    ).toEqual(
+      expect.arrayContaining([expect.stringContaining('# Preferences')]),
+    );
     expect(state.last_summarized_turn_id).toBe(2);
     expect(state.last_summary_at).toBeTruthy();
     expect(state.summary_yaml).toContain('Track the latest conversation state');

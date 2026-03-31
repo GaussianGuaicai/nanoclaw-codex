@@ -106,11 +106,22 @@ export function getDefaultSummaryYaml(): string {
 function normalizeComparableText(value: string): string {
   return value
     .toLowerCase()
-    .replace(/[`*_#>]/g, ' ')
+    .replace(/[`*_#]/g, ' ')
+    .replace(/^\s*>\s+/gm, '')
     .replace(/^\s*[-*+•]\s+/gm, '')
     .replace(/^\s*\d+\.\s+/gm, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function normalizeSummaryListItems(items: string[]): string[] {
+  return Array.from(
+    new Set(
+      items
+        .map((item: string) => item.trim())
+        .filter((item: string) => item.length > 0),
+    ),
+  );
 }
 
 function extractSharedInstructionCandidates(
@@ -140,17 +151,14 @@ function isGenericPromptRule(item: string): boolean {
   if (!normalized) return true;
 
   return [
-    'return yaml only.',
-    'return yaml only',
-    'do not use markdown fences.',
-    'do not use markdown fences',
-    'do not output explanations.',
-    'do not output explanations',
-    'channel reply requirements:',
-    'decide whether this event needs a user-facing reply.',
-    'if the user should be informed, send a concise user-facing reply suitable for the target channel.',
-    'if no user-visible update is needed, return only <internal></internal> content.',
-  ].some((value) => normalized === normalizeComparableText(value));
+    /^return yaml only\.?$/,
+    /^do not use markdown fences\.?$/,
+    /^do not output explanations\.?$/,
+    /^channel reply requirements:?$/,
+    /^decide whether this (event|run) needs a user-facing (reply|update)\.?$/,
+    /^if the user should be informed, send a concise user-facing (reply|update) suitable for the target channel\.?$/,
+    /^if (?:the task completed successfully but nothing needs to be surfaced now|no user-visible update is needed), return only <internal>(?:\.\.\.)?<\/internal> content\.?$/,
+  ].some((pattern) => pattern.test(normalized));
 }
 
 export function cleanSummaryMemoryAgainstSharedInstructions(params: {
@@ -158,11 +166,16 @@ export function cleanSummaryMemoryAgainstSharedInstructions(params: {
   sharedInstructionTexts: string[];
   maxItemsPerList: number;
 }): SummaryMemoryDocument {
-  const normalized = normalizeSummaryMemory(params.doc, params.maxItemsPerList);
+  const normalized = summaryMemorySchema.parse(params.doc) as SummaryMemoryDocument;
+  normalized.session_state.task = normalized.session_state.task.trim();
   const instructionCandidates = extractSharedInstructionCandidates(
     params.sharedInstructionTexts,
   );
   const next = structuredClone(normalized) as SummaryMemoryDocument;
+
+  for (const key of summaryListKeys) {
+    next.session_state[key] = normalizeSummaryListItems(next.session_state[key]);
+  }
 
   for (const key of ['decisions', 'user_preferences', 'constraints'] as const) {
     next.session_state[key] = next.session_state[key].filter((item) => {
@@ -173,7 +186,14 @@ export function cleanSummaryMemoryAgainstSharedInstructions(params: {
     });
   }
 
-  return normalizeSummaryMemory(next, params.maxItemsPerList);
+  for (const key of summaryListKeys) {
+    next.session_state[key] = next.session_state[key].slice(
+      0,
+      params.maxItemsPerList,
+    );
+  }
+
+  return next;
 }
 
 export function buildSummaryUpdatePrompt(params: {
@@ -269,7 +289,7 @@ export async function updateSummaryMemory(params: {
   const output = await params.invoke(prompt);
   try {
     const doc = cleanSummaryMemoryAgainstSharedInstructions({
-      doc: parseSummaryMemoryYaml(output, params.config.maxItemsPerList),
+      doc: parseSummaryMemoryYaml(output, Number.MAX_SAFE_INTEGER),
       sharedInstructionTexts: params.sharedInstructionTexts || [],
       maxItemsPerList: params.config.maxItemsPerList,
     });
@@ -287,7 +307,7 @@ export async function updateSummaryMemory(params: {
       }),
     );
     const repaired = cleanSummaryMemoryAgainstSharedInstructions({
-      doc: parseSummaryMemoryYaml(repairOutput, params.config.maxItemsPerList),
+      doc: parseSummaryMemoryYaml(repairOutput, Number.MAX_SAFE_INTEGER),
       sharedInstructionTexts: params.sharedInstructionTexts || [],
       maxItemsPerList: params.config.maxItemsPerList,
     });

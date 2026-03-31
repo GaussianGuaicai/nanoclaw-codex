@@ -223,7 +223,9 @@ describe('summary-memory', () => {
     expect(updated.yaml).toContain(
       'Route deliverOutput replies back through the owning channel.',
     );
-    expect(updated.yaml).not.toContain('Keep services on the host when possible.');
+    expect(updated.yaml).not.toContain(
+      'Keep services on the host when possible.',
+    );
     expect(updated.yaml).not.toContain('Return YAML only.');
   });
 });

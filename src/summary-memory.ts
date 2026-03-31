@@ -166,7 +166,9 @@ export function cleanSummaryMemoryAgainstSharedInstructions(params: {
   sharedInstructionTexts: string[];
   maxItemsPerList: number;
 }): SummaryMemoryDocument {
-  const normalized = summaryMemorySchema.parse(params.doc) as SummaryMemoryDocument;
+  const normalized = summaryMemorySchema.parse(
+    params.doc,
+  ) as SummaryMemoryDocument;
   normalized.session_state.task = normalized.session_state.task.trim();
   const instructionCandidates = extractSharedInstructionCandidates(
     params.sharedInstructionTexts,
@@ -174,7 +176,9 @@ export function cleanSummaryMemoryAgainstSharedInstructions(params: {
   const next = structuredClone(normalized) as SummaryMemoryDocument;
 
   for (const key of summaryListKeys) {
-    next.session_state[key] = normalizeSummaryListItems(next.session_state[key]);
+    next.session_state[key] = normalizeSummaryListItems(
+      next.session_state[key],
+    );
   }
 
   for (const key of ['decisions', 'user_preferences', 'constraints'] as const) {

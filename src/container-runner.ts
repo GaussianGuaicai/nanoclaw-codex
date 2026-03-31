@@ -293,11 +293,7 @@ function sanitizeWorkerLogPath(filePath: string): string {
   const normalized = path.normalize(filePath);
   const relative = path.relative(process.cwd(), normalized);
 
-  if (
-    relative &&
-    !relative.startsWith('..') &&
-    !path.isAbsolute(relative)
-  ) {
+  if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) {
     return relative;
   }
 

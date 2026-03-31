@@ -342,9 +342,8 @@ describe('container-runner worker execution', () => {
     expect(logWrite?.[1]).toContain(
       'Rule Priority: CURRENT_INPUT > Shared Instructions > Structured Summary > Recent Turns > Session Background',
     );
-    expect(logWrite?.[1]).toContain(
-      '/tmp/nanoclaw-test-groups/test-group/preferences.md',
-    );
+    expect(logWrite?.[1]).toContain('preferences.md');
+    expect(logWrite?.[1]).not.toContain('/tmp/nanoclaw-test-groups/test-group');
     expect(logWrite?.[1]).toContain('WebSocket-triggered prompt body');
     expect(logWrite?.[1]).toContain('=== Result ===');
     expect(logWrite?.[1]).toContain('No user-facing action needed.');
@@ -575,9 +574,8 @@ describe('container-runner worker execution', () => {
     );
     expect(timeoutLog).toBeDefined();
     expect(String(timeoutLog?.[1])).toContain('=== Shared Instructions ===');
-    expect(String(timeoutLog?.[1])).toContain(
-      '/tmp/nanoclaw-test-groups/test-group/preferences.md',
-    );
+    expect(String(timeoutLog?.[1])).toContain('preferences.md');
+    expect(String(timeoutLog?.[1])).not.toContain('/tmp/nanoclaw-test-groups');
   });
 
   it('launches a local worker and injects runtimePaths into the worker input', async () => {

@@ -115,7 +115,7 @@ describe('summary-memory', () => {
           'session_state:',
           '  task: "Track preferences"',
           '  decisions:',
-          '    - When Gaussian arrives home, mention that the computer is usually already opened automatically, but do not trigger anything yourself.',
+          '    - When the user arrives home, mention that the computer is usually already opened automatically, but do not trigger anything yourself.',
           '    - Return YAML only.',
           '    - Keep the living room comfortable.',
           '  constraints:',
@@ -125,15 +125,15 @@ describe('summary-memory', () => {
           '  important_paths: []',
           '  recent_failures: []',
           '  user_preferences:',
-          '    - Treat `Gaussian-WiFi*` as home Wi-Fi.',
-          '    - Gaussian prefers terse status updates.',
+          '    - Treat `Home-WiFi*` as home Wi-Fi.',
+          '    - The user prefers terse status updates.',
         ].join('\n'),
         10,
       ),
       sharedInstructionTexts: [
         [
-          '- Treat `Gaussian-WiFi*` as home Wi-Fi.',
-          '- When Gaussian arrives home, mention that the computer is usually already opened automatically, but do not trigger anything yourself.',
+          '- Treat `Home-WiFi*` as home Wi-Fi.',
+          '- When the user arrives home, mention that the computer is usually already opened automatically, but do not trigger anything yourself.',
         ].join('\n'),
       ],
       maxItemsPerList: 10,
@@ -144,7 +144,7 @@ describe('summary-memory', () => {
     ]);
     expect(cleaned.session_state.constraints).toEqual([]);
     expect(cleaned.session_state.user_preferences).toEqual([
-      'Gaussian prefers terse status updates.',
+      'The user prefers terse status updates.',
     ]);
   });
 
@@ -152,7 +152,7 @@ describe('summary-memory', () => {
     const updated = await updateSummaryMemory({
       currentSummaryYaml: getDefaultSummaryYaml(),
       deltaTurns: [],
-      sharedInstructionTexts: ['- Treat `Gaussian-WiFi*` as home Wi-Fi.'],
+      sharedInstructionTexts: ['- Treat `Home-WiFi*` as home Wi-Fi.'],
       config: {
         enabled: true,
         model: 'gpt-5.4-mini',
@@ -171,12 +171,12 @@ describe('summary-memory', () => {
           '  important_paths: []',
           '  recent_failures: []',
           '  user_preferences:',
-          '    - Treat `Gaussian-WiFi*` as home Wi-Fi.',
+          '    - Treat `Home-WiFi*` as home Wi-Fi.',
           '    - Prefer short updates.',
         ].join('\n'),
     });
 
-    expect(updated.yaml).not.toContain('Treat `Gaussian-WiFi*` as home Wi-Fi.');
+    expect(updated.yaml).not.toContain('Treat `Home-WiFi*` as home Wi-Fi.');
     expect(updated.yaml).toContain('Prefer short updates.');
   });
 });

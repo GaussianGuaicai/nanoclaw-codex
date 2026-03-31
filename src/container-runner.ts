@@ -268,6 +268,9 @@ function redactRemoteMcpServersForLogging(
 function redactWorkerInputForLogging(input: ContainerInput): ContainerInput {
   return {
     ...input,
+    runtimePaths: input.runtimePaths
+      ? sanitizeAgentRuntimePathsForLogging(input.runtimePaths)
+      : input.runtimePaths,
     remoteMcpServers: redactRemoteMcpServersForLogging(input.remoteMcpServers),
     ...(input.sdkSecrets
       ? {
@@ -283,6 +286,52 @@ function redactWorkerInputForLogging(input: ContainerInput): ContainerInput {
           ),
         }
       : {}),
+  };
+}
+
+function sanitizeWorkerLogPath(filePath: string): string {
+  const normalized = path.normalize(filePath);
+  const relative = path.relative(process.cwd(), normalized);
+
+  if (
+    relative &&
+    !relative.startsWith('..') &&
+    !path.isAbsolute(relative)
+  ) {
+    return relative;
+  }
+
+  return path.basename(normalized) || normalized;
+}
+
+function sanitizeAgentRuntimePathsForLogging(
+  runtimePaths: AgentRuntimePaths,
+): AgentRuntimePaths {
+  return {
+    groupPath: sanitizeWorkerLogPath(runtimePaths.groupPath),
+    ipcPath: sanitizeWorkerLogPath(runtimePaths.ipcPath),
+    codexHome: sanitizeWorkerLogPath(runtimePaths.codexHome),
+    additionalDirectories: runtimePaths.additionalDirectories.map(
+      sanitizeWorkerLogPath,
+    ),
+    writableRoots: runtimePaths.writableRoots.map(sanitizeWorkerLogPath),
+    sharedInstructionFiles: runtimePaths.sharedInstructionFiles.map(
+      sanitizeWorkerLogPath,
+    ),
+  };
+}
+
+function sanitizeAgentExecutionLayoutForLogging(
+  layout: AgentExecutionLayout,
+): AgentExecutionLayout {
+  return {
+    ...layout,
+    ...sanitizeAgentRuntimePathsForLogging(layout),
+    snapshotMappings: layout.snapshotMappings.map((mapping) => ({
+      ...mapping,
+      sourcePath: sanitizeWorkerLogPath(mapping.sourcePath),
+      targetPath: sanitizeWorkerLogPath(mapping.targetPath),
+    })),
   };
 }
 
@@ -543,6 +592,7 @@ export async function runContainerAgent(
 
   const layout = buildAgentExecutionLayout(group, input.isMain);
   input.runtimePaths = layout;
+  const loggableLayout = sanitizeAgentExecutionLayoutForLogging(layout);
   const remoteMcpEnv = loadRemoteMcpEnv(group.containerConfig?.mcpServers);
   input.remoteMcpServers = sanitizeRemoteMcpServers(
     group.containerConfig?.mcpServers,
@@ -565,7 +615,7 @@ export async function runContainerAgent(
       executionName,
       command: launch.command,
       args: launch.args,
-      layout,
+      layout: loggableLayout,
     },
     'Agent execution configuration',
   );
@@ -575,8 +625,8 @@ export async function runContainerAgent(
       group: group.name,
       executionName,
       isMain: input.isMain,
-      writableRoots: layout.writableRoots,
-      additionalDirectories: layout.additionalDirectories,
+      writableRoots: loggableLayout.writableRoots,
+      additionalDirectories: loggableLayout.additionalDirectories,
     },
     'Spawning local Codex worker',
   );
@@ -714,6 +764,8 @@ export async function runContainerAgent(
         const now = new Date();
         const ts = formatLocalTimestampForFilename(now);
         const timeoutLog = path.join(logsDir, `worker-${ts}.log`);
+        const loggableTimeoutLayout =
+          sanitizeAgentExecutionLayoutForLogging(layout);
         fs.writeFileSync(
           timeoutLog,
           [
@@ -725,7 +777,7 @@ export async function runContainerAgent(
             `Exit Code: ${code}`,
             `Had Streaming Output: ${hadStreamingOutput}`,
             '=== Shared Instructions ===',
-            layout.sharedInstructionFiles.join('\n') || '(none)',
+            loggableTimeoutLayout.sharedInstructionFiles.join('\n') || '(none)',
           ].join('\n'),
         );
 
@@ -806,13 +858,13 @@ export async function runContainerAgent(
           '',
           ...buildContextLogLines(input),
           '=== Additional Directories ===',
-          layout.additionalDirectories.join('\n') || '(none)',
+          loggableLayout.additionalDirectories.join('\n') || '(none)',
           '',
           '=== Writable Roots ===',
-          layout.writableRoots.join('\n') || '(none)',
+          loggableLayout.writableRoots.join('\n') || '(none)',
           '',
           '=== Shared Instructions ===',
-          layout.sharedInstructionFiles.join('\n') || '(none)',
+          loggableLayout.sharedInstructionFiles.join('\n') || '(none)',
           '',
         );
 

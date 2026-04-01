@@ -25,7 +25,7 @@ import {
 } from './container-runner.js';
 import {
   buildLiveSessionKey,
-  buildPromptWithBootstrap,
+  getPromptWithBootstrapDetails,
   isContextSourceEnabled,
   prepareContextSessionForTurn,
   recordCompletedContextTurn,
@@ -404,14 +404,24 @@ async function runAgent(
   const promptWithBackground = pendingBackgroundPrompt
     ? `${pendingBackgroundPrompt}\n\n${prompt}`
     : prompt;
-  const promptWithBootstrap = participation.enabled
-    ? buildPromptWithBootstrap({
+  const promptWithContext = participation.enabled
+    ? getPromptWithBootstrapDetails({
         groupFolder: group.folder,
         source: 'chat',
         prompt: promptWithBackground,
         sessionId,
+        config: participation.config,
       })
-    : promptWithBackground;
+    : {
+        prompt: promptWithBackground,
+        contextDebug: {
+          bootstrapUsed: false,
+          memoryRefreshUsed: false,
+          summaryIncluded: false,
+          recentTurnsScope: 'none' as const,
+          recentTurnCount: 0,
+        },
+      };
 
   // Update tasks snapshot for the worker to read (filtered by group)
   const tasks = getAllTasks();
@@ -473,7 +483,8 @@ async function runAgent(
     const output = await runContainerAgent(
       group,
       {
-        prompt: promptWithBootstrap,
+        prompt: promptWithContext.prompt,
+        contextDebug: promptWithContext.contextDebug,
         sessionId,
         groupFolder: group.folder,
         chatJid,

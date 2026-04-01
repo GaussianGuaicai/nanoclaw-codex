@@ -10,11 +10,15 @@ import {
   updateGroupMemoryState,
 } from './db.js';
 import { loadContextConfig } from './context-config.js';
-import { buildContextBootstrapBundle } from './context-bootstrap.js';
+import {
+  buildContextBootstrapBundle,
+  buildContextMemoryRefreshBundle,
+} from './context-bootstrap.js';
 import {
   computeSlidingWindowBoundary,
   shouldCompactContext,
 } from './context-compaction.js';
+import { selectContextTurnsForPrompt } from './context-selection.js';
 import { estimateTokens } from './context-store.js';
 import { logger } from './logger.js';
 import { updateSummaryMemory } from './summary-memory.js';
@@ -59,6 +63,7 @@ export function buildPromptWithBootstrap(params: {
   source: AgentTaskSource;
   prompt: string;
   sessionId?: string;
+  config?: ReturnType<typeof loadContextConfig>;
 }): string {
   return getPromptWithBootstrapDetails(params).prompt;
 }
@@ -68,24 +73,55 @@ export function getPromptWithBootstrapDetails(params: {
   source: AgentTaskSource;
   prompt: string;
   sessionId?: string;
+  config?: ReturnType<typeof loadContextConfig>;
 }): {
   prompt: string;
   contextDebug: {
     bootstrapUsed: boolean;
+    memoryRefreshUsed: boolean;
     summaryIncluded: boolean;
     recentTurnsScope: 'shared' | 'source-only' | 'none';
     recentTurnCount: number;
   };
 } {
   const memoryState = getOrCreateGroupMemoryState(params.groupFolder);
+  const config = params.config ?? loadContextConfig();
+  const historyScope =
+    params.source === 'chat' ? ('shared' as const) : ('source-only' as const);
+
   if (params.sessionId && params.sessionId.trim()) {
+    const unsummarizedTurns = getContextTurnsAfterId(
+      params.groupFolder,
+      Math.max(
+        memoryState.last_compacted_turn_id,
+        memoryState.last_summarized_turn_id,
+      ),
+    );
+    const scopedUnsummarizedTurns =
+      historyScope === 'shared'
+        ? unsummarizedTurns
+        : unsummarizedTurns.filter((turn) => turn.source === params.source);
+    const selectedRefreshTurns = selectContextTurnsForPrompt({
+      turns: scopedUnsummarizedTurns,
+      currentInput: params.prompt,
+      window: config.compaction.window,
+    });
+    const refresh = buildContextMemoryRefreshBundle({
+      summaryYaml: memoryState.summary_yaml,
+      recentTurns: selectedRefreshTurns,
+      currentInput: params.prompt,
+      currentSource: params.source,
+      historyScope,
+    });
+
     return {
-      prompt: params.prompt,
+      prompt: refresh.prompt,
       contextDebug: {
         bootstrapUsed: false,
-        summaryIncluded: false,
-        recentTurnsScope: 'none',
-        recentTurnCount: 0,
+        memoryRefreshUsed: true,
+        summaryIncluded: refresh.metadata.summaryIncluded,
+        recentTurnsScope: refresh.metadata.historyScope,
+        recentTurnCount: refresh.metadata.recentTurnCount,
       },
     };
   }
@@ -94,15 +130,18 @@ export function getPromptWithBootstrapDetails(params: {
     params.groupFolder,
     memoryState.last_compacted_turn_id,
   );
-  const historyScope =
-    params.source === 'chat' ? ('shared' as const) : ('source-only' as const);
   const scopedRecentTurns =
     historyScope === 'shared'
       ? recentTurns
       : recentTurns.filter((turn) => turn.source === params.source);
+  const selectedRecentTurns = selectContextTurnsForPrompt({
+    turns: scopedRecentTurns,
+    currentInput: params.prompt,
+    window: config.compaction.window,
+  });
   const bundle = buildContextBootstrapBundle({
     summaryYaml: memoryState.summary_yaml,
-    recentTurns: scopedRecentTurns,
+    recentTurns: selectedRecentTurns,
     currentInput: params.prompt,
     currentSource: params.source,
     historyScope,
@@ -112,6 +151,7 @@ export function getPromptWithBootstrapDetails(params: {
     prompt: bundle.prompt,
     contextDebug: {
       bootstrapUsed: true,
+      memoryRefreshUsed: false,
       summaryIncluded: bundle.metadata.summaryIncluded,
       recentTurnsScope: bundle.metadata.historyScope,
       recentTurnCount: bundle.metadata.recentTurnCount,

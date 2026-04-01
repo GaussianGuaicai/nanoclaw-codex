@@ -299,6 +299,7 @@ describe('container-runner worker execution', () => {
         },
         contextDebug: {
           bootstrapUsed: true,
+          memoryRefreshUsed: false,
           summaryIncluded: true,
           recentTurnsScope: 'source-only',
           recentTurnCount: 3,
@@ -336,6 +337,7 @@ describe('container-runner worker execution', () => {
     expect(logWrite?.[1]).toContain('=== Shared Instructions ===');
     expect(logWrite?.[1]).toContain('=== Context Summary ===');
     expect(logWrite?.[1]).toContain('Bootstrap Used: true');
+    expect(logWrite?.[1]).toContain('Memory Refresh Used: false');
     expect(logWrite?.[1]).toContain('Summary Included: true');
     expect(logWrite?.[1]).toContain('Recent Turns Scope: source-only');
     expect(logWrite?.[1]).toContain('Recent Turn Count: 3');

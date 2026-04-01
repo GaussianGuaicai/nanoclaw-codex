@@ -139,11 +139,13 @@ export async function runSingleTurnAgentTask(
         source: request.source,
         prompt: buildTaskPrompt(request),
         sessionId,
+        config: contextParticipation.config,
       })
     : {
         prompt: buildTaskPrompt(request),
         contextDebug: {
           bootstrapUsed: false,
+          memoryRefreshUsed: false,
           summaryIncluded: false,
           recentTurnsScope: 'none' as const,
           recentTurnCount: 0,

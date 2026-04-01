@@ -66,6 +66,7 @@ export interface ContainerInput {
   };
   contextDebug?: {
     bootstrapUsed: boolean;
+    memoryRefreshUsed: boolean;
     summaryIncluded: boolean;
     recentTurnsScope: 'shared' | 'source-only' | 'none';
     recentTurnCount: number;
@@ -336,6 +337,7 @@ function buildContextLogLines(input: ContainerInput): string[] {
     return [
       '=== Context Summary ===',
       'Bootstrap Used: unknown',
+      'Memory Refresh Used: unknown',
       'Summary Included: unknown',
       'Recent Turns Scope: unknown',
       'Recent Turn Count: unknown',
@@ -347,6 +349,7 @@ function buildContextLogLines(input: ContainerInput): string[] {
   return [
     '=== Context Summary ===',
     `Bootstrap Used: ${input.contextDebug.bootstrapUsed}`,
+    `Memory Refresh Used: ${input.contextDebug.memoryRefreshUsed}`,
     `Summary Included: ${input.contextDebug.summaryIncluded}`,
     `Recent Turns Scope: ${input.contextDebug.recentTurnsScope}`,
     `Recent Turn Count: ${input.contextDebug.recentTurnCount}`,

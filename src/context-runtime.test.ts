@@ -242,11 +242,153 @@ describe('buildPromptWithBootstrap', () => {
 
     expect(result.contextDebug).toEqual({
       bootstrapUsed: true,
+      memoryRefreshUsed: false,
       summaryIncluded: true,
       recentTurnsScope: 'shared',
       recentTurnCount: 1,
     });
     expect(result.prompt).toContain('CURRENT_INPUT:');
+  });
+
+  it('limits cold-start bootstrap to a budgeted subset of recent turns', () => {
+    loadContextConfigMock.mockReturnValue({
+      ...baseConfig,
+      compaction: {
+        ...baseConfig.compaction,
+        window: {
+          keepRecentTurns: 24,
+          keepRecentEstimatedTokens: 16,
+        },
+      },
+    });
+
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'chat:test-room',
+      source: 'chat',
+      role: 'user',
+      content: 'Older setup details.',
+      created_at: '2026-03-25T13:50:00.000Z',
+      est_tokens: 8,
+    });
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'chat:test-room',
+      source: 'chat',
+      role: 'assistant',
+      content: 'Older answer details.',
+      created_at: '2026-03-25T13:51:00.000Z',
+      est_tokens: 8,
+    });
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'chat:test-room',
+      source: 'chat',
+      role: 'user',
+      content: 'Need agent config override debugging right now.',
+      created_at: '2026-03-25T13:52:00.000Z',
+      est_tokens: 8,
+    });
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'chat:test-room',
+      source: 'chat',
+      role: 'assistant',
+      content: 'Latest debugging output.',
+      created_at: '2026-03-25T13:53:00.000Z',
+      est_tokens: 8,
+    });
+
+    const result = getPromptWithBootstrapDetails({
+      groupFolder: testGroup.folder,
+      source: 'chat',
+      prompt: 'Please debug the agent config override issue.',
+    });
+
+    expect(result.prompt).toContain('Need agent config override debugging right now.');
+    expect(result.prompt).toContain('Latest debugging output.');
+    expect(result.prompt).not.toContain('Older setup details.');
+    expect(result.prompt).not.toContain('Older answer details.');
+    expect(result.contextDebug.recentTurnCount).toBe(2);
+  });
+
+  it('refreshes resumed sessions with summary and unsummarized turns', () => {
+    loadContextConfigMock.mockReturnValue({
+      ...baseConfig,
+      compaction: {
+        ...baseConfig.compaction,
+        window: {
+          keepRecentTurns: 24,
+          keepRecentEstimatedTokens: 50,
+        },
+      },
+    });
+
+    updateGroupMemoryState(testGroup.folder, {
+      summary_yaml: 'session_state:\n  task: "Track config drift."',
+      last_summarized_turn_id: 2,
+    });
+
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'chat:test-room',
+      source: 'chat',
+      role: 'user',
+      content: 'Already summarized question.',
+      created_at: '2026-03-25T13:50:00.000Z',
+      est_tokens: 8,
+      batch_id: 'batch-1',
+    });
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'chat:test-room',
+      source: 'chat',
+      role: 'assistant',
+      content: 'Already summarized answer.',
+      created_at: '2026-03-25T13:51:00.000Z',
+      est_tokens: 8,
+      batch_id: 'batch-1',
+    });
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'chat:test-room',
+      source: 'chat',
+      role: 'user',
+      content: 'Recent unsummarized config change.',
+      created_at: '2026-03-25T13:52:00.000Z',
+      est_tokens: 8,
+      batch_id: 'batch-2',
+    });
+    insertContextTurn({
+      group_folder: testGroup.folder,
+      chat_jid: 'chat:test-room',
+      source: 'chat',
+      role: 'assistant',
+      content: 'Recent unsummarized fix.',
+      created_at: '2026-03-25T13:53:00.000Z',
+      est_tokens: 8,
+      batch_id: 'batch-2',
+    });
+
+    const result = getPromptWithBootstrapDetails({
+      groupFolder: testGroup.folder,
+      source: 'chat',
+      prompt: 'Continue the resumed session.',
+      sessionId: 'existing-session',
+    });
+
+    expect(result.prompt).toContain('MEMORY_REFRESH');
+    expect(result.prompt).toContain('Track config drift.');
+    expect(result.prompt).toContain('Recent unsummarized config change.');
+    expect(result.prompt).toContain('Recent unsummarized fix.');
+    expect(result.prompt).not.toContain('Already summarized question.');
+    expect(result.contextDebug).toEqual({
+      bootstrapUsed: false,
+      memoryRefreshUsed: true,
+      summaryIncluded: true,
+      recentTurnsScope: 'shared',
+      recentTurnCount: 2,
+    });
   });
 });
 

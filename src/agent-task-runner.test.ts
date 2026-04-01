@@ -49,6 +49,7 @@ const {
       prompt: params.prompt,
       contextDebug: {
         bootstrapUsed: true,
+        memoryRefreshUsed: false,
         summaryIncluded: true,
         recentTurnsScope: 'shared',
         recentTurnCount: 0,
@@ -218,6 +219,7 @@ describe('runSingleTurnAgentTask', () => {
       prompt: 'bootstrapped prompt',
       contextDebug: {
         bootstrapUsed: true,
+        memoryRefreshUsed: false,
         summaryIncluded: true,
         recentTurnsScope: 'shared',
         recentTurnCount: 0,

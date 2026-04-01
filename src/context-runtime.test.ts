@@ -305,7 +305,9 @@ describe('buildPromptWithBootstrap', () => {
       prompt: 'Please debug the agent config override issue.',
     });
 
-    expect(result.prompt).toContain('Need agent config override debugging right now.');
+    expect(result.prompt).toContain(
+      'Need agent config override debugging right now.',
+    );
     expect(result.prompt).toContain('Latest debugging output.');
     expect(result.prompt).not.toContain('Older setup details.');
     expect(result.prompt).not.toContain('Older answer details.');

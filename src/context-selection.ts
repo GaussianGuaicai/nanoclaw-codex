@@ -54,7 +54,10 @@ export function selectContextTurnsForPrompt(params: {
   const batches = groupTurnsIntoBatches(params.turns);
   const selectedIds = new Set<number>();
   const selectedBatches: ContextTurnBatch[] = [];
-  let remainingTokenBudget = Math.max(1, params.window.keepRecentEstimatedTokens);
+  let remainingTokenBudget = Math.max(
+    1,
+    params.window.keepRecentEstimatedTokens,
+  );
   let selectedTurnCount = 0;
   let retrievedTurnCount = 0;
   const recentTurnBudget = Math.max(
@@ -190,7 +193,10 @@ function markSelected(batch: ContextTurnBatch, selectedIds: Set<number>): void {
 
 function extractQueryTerms(text: string): Set<string> {
   const matches =
-    text.toLowerCase().match(/[\p{L}\p{N}_./-]+/gu)?.filter(Boolean) || [];
+    text
+      .toLowerCase()
+      .match(/[\p{L}\p{N}_./-]+/gu)
+      ?.filter(Boolean) || [];
   const normalized = matches
     .map((term) => term.trim())
     .filter((term) => term.length >= MIN_QUERY_TERM_LENGTH)
@@ -205,7 +211,10 @@ function countOverlap(text: string, queryTerms: Set<string>): number {
 
   const seen = new Set<string>();
   const terms =
-    text.toLowerCase().match(/[\p{L}\p{N}_./-]+/gu)?.filter(Boolean) || [];
+    text
+      .toLowerCase()
+      .match(/[\p{L}\p{N}_./-]+/gu)
+      ?.filter(Boolean) || [];
   for (const term of terms) {
     if (queryTerms.has(term)) {
       seen.add(term);

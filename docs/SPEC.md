@@ -1,6 +1,14 @@
 # NanoClaw Specification
 
-A personal Claude assistant with multi-channel support, persistent memory per conversation, scheduled tasks, and container-isolated agent execution.
+A personal Codex-powered assistant with multi-channel support, persistent memory per conversation, scheduled tasks, and sandboxed local worker execution.
+
+> Note
+> This document still contains some legacy container-era detail and is not yet a full description of the current runtime.
+> For the current architecture, prefer:
+> - `README.md`
+> - `docs/SECURITY.md`
+> - `docs/CONTEXT_MEMORY.md`
+> - `docs/DEBUG_CHECKLIST.md`
 
 ---
 
@@ -77,7 +85,7 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 |-----------|------------|---------|
 | Channel System | Channel registry (`src/channels/registry.ts`) | Channels self-register at startup |
 | Message Storage | SQLite (better-sqlite3) | Store messages for polling |
-| Container Runtime | Containers (Linux VMs) | Isolated environments for agent execution |
+| Worker Runtime | Local Codex worker | Sandboxed per-group agent execution |
 | Agent | @anthropic-ai/claude-agent-sdk (0.2.29) | Run Claude with tools and MCP servers |
 | Browser Automation | agent-browser + Chromium | Web interaction and screenshots |
 | Runtime | Node.js 20+ | Host process for routing and scheduling |

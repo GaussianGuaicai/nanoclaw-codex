@@ -10,7 +10,7 @@ import {
 } from './container-runner.js';
 import {
   buildLiveSessionKey,
-  buildPromptWithBootstrap,
+  getPromptWithBootstrapDetails,
   isContextSourceEnabled,
   prepareContextSessionForTurn,
   recordCompletedContextTurn,
@@ -133,14 +133,24 @@ export async function runSingleTurnAgentTask(
         })
       : undefined
     : existingSessionId;
-  const promptWithBootstrap = contextParticipation.enabled
-    ? buildPromptWithBootstrap({
+  const promptWithContext = contextParticipation.enabled
+    ? getPromptWithBootstrapDetails({
         groupFolder: group.folder,
         source: request.source,
         prompt: buildTaskPrompt(request),
         sessionId,
+        config: contextParticipation.config,
       })
-    : buildTaskPrompt(request);
+    : {
+        prompt: buildTaskPrompt(request),
+        contextDebug: {
+          bootstrapUsed: false,
+          memoryRefreshUsed: false,
+          summaryIncluded: false,
+          recentTurnsScope: 'none' as const,
+          recentTurnCount: 0,
+        },
+      };
 
   writeTaskSnapshot(group);
 
@@ -188,7 +198,8 @@ export async function runSingleTurnAgentTask(
     const output = await runContainerAgent(
       group,
       {
-        prompt: promptWithBootstrap,
+        prompt: promptWithContext.prompt,
+        contextDebug: promptWithContext.contextDebug,
         sessionId,
         groupFolder: group.folder,
         chatJid: request.chatJid,

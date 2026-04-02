@@ -103,6 +103,103 @@ export function getDefaultSummaryYaml(): string {
   return stringifySummaryMemoryYaml(createEmptySummaryMemory());
 }
 
+function normalizeComparableText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[`*_#]/g, ' ')
+    .replace(/^\s*>\s+/gm, '')
+    .replace(/^\s*[-*+•]\s+/gm, '')
+    .replace(/^\s*\d+\.\s+/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeSummaryListItems(items: string[]): string[] {
+  return Array.from(
+    new Set(
+      items
+        .map((item: string) => item.trim())
+        .filter((item: string) => item.length > 0),
+    ),
+  );
+}
+
+function extractSharedInstructionCandidates(
+  sharedInstructionTexts: string[],
+): Set<string> {
+  const candidates = new Set<string>();
+
+  for (const text of sharedInstructionTexts) {
+    const normalizedWhole = normalizeComparableText(text);
+    if (normalizedWhole) {
+      candidates.add(normalizedWhole);
+    }
+
+    for (const line of text.split('\n')) {
+      const normalizedLine = normalizeComparableText(line);
+      if (normalizedLine) {
+        candidates.add(normalizedLine);
+      }
+    }
+  }
+
+  return candidates;
+}
+
+function isGenericPromptRule(item: string): boolean {
+  const normalized = normalizeComparableText(item);
+  if (!normalized) return true;
+
+  return [
+    /^return yaml only\.?$/,
+    /^do not use markdown fences\.?$/,
+    /^do not output explanations\.?$/,
+    /^channel reply requirements:?$/,
+    /^decide whether this (event|run) needs a user-facing (reply|update)\.?$/,
+    /^if the user should be informed, send a concise user-facing (reply|update) suitable for the target channel\.?$/,
+    /^if (?:the task completed successfully but nothing needs to be surfaced now|no user-visible update is needed), return only <internal>(?:\.\.\.)?<\/internal> content\.?$/,
+  ].some((pattern) => pattern.test(normalized));
+}
+
+export function cleanSummaryMemoryAgainstSharedInstructions(params: {
+  doc: SummaryMemoryDocument;
+  sharedInstructionTexts: string[];
+  maxItemsPerList: number;
+}): SummaryMemoryDocument {
+  const normalized = summaryMemorySchema.parse(
+    params.doc,
+  ) as SummaryMemoryDocument;
+  normalized.session_state.task = normalized.session_state.task.trim();
+  const instructionCandidates = extractSharedInstructionCandidates(
+    params.sharedInstructionTexts,
+  );
+  const next = structuredClone(normalized) as SummaryMemoryDocument;
+
+  for (const key of summaryListKeys) {
+    next.session_state[key] = normalizeSummaryListItems(
+      next.session_state[key],
+    );
+  }
+
+  for (const key of ['decisions', 'user_preferences', 'constraints'] as const) {
+    next.session_state[key] = next.session_state[key].filter((item) => {
+      const normalizedItem = normalizeComparableText(item);
+      if (!normalizedItem) return false;
+      if (isGenericPromptRule(item)) return false;
+      return !instructionCandidates.has(normalizedItem);
+    });
+  }
+
+  for (const key of summaryListKeys) {
+    next.session_state[key] = next.session_state[key].slice(
+      0,
+      params.maxItemsPerList,
+    );
+  }
+
+  return next;
+}
+
 export function buildSummaryUpdatePrompt(params: {
   currentSummaryYaml: string;
   deltaTurns: Array<{
@@ -137,6 +234,9 @@ export function buildSummaryUpdatePrompt(params: {
     '- Do not copy formatting or meta-output rules from this prompt into the summary.',
     '- Do not restate long-lived policies or preferences that already live in shared instruction files such as AGENTS.md, CLAUDE.md, or preferences.md.',
     '- Use user_preferences only for preferences learned from conversation that are not already captured in shared instruction files.',
+    '- decisions should contain only durable operating conclusions that remain useful across multiple future turns.',
+    '- Do not put one-off event adjudications, temporary environment readings, or single-run outcomes into decisions.',
+    '- Do not store long-lived preferences in decisions when shared instruction files already contain them.',
     '- Keep unresolved questions in open_questions.',
     '- Move resolved questions out of open_questions.',
     '- Keep recent_failures limited to recent real failures only.',
@@ -181,6 +281,7 @@ export async function updateSummaryMemory(params: {
     content: string;
     createdAt: string;
   }>;
+  sharedInstructionTexts?: string[];
   config: SummaryMemoryConfig;
   invoke: (prompt: string) => Promise<string>;
 }): Promise<{ yaml: string; repaired: boolean }> {
@@ -191,7 +292,11 @@ export async function updateSummaryMemory(params: {
 
   const output = await params.invoke(prompt);
   try {
-    const doc = parseSummaryMemoryYaml(output, params.config.maxItemsPerList);
+    const doc = cleanSummaryMemoryAgainstSharedInstructions({
+      doc: parseSummaryMemoryYaml(output, Number.MAX_SAFE_INTEGER),
+      sharedInstructionTexts: params.sharedInstructionTexts || [],
+      maxItemsPerList: params.config.maxItemsPerList,
+    });
     return {
       yaml: stringifySummaryMemoryYaml(doc),
       repaired: false,
@@ -205,10 +310,11 @@ export async function updateSummaryMemory(params: {
         validationError,
       }),
     );
-    const repaired = parseSummaryMemoryYaml(
-      repairOutput,
-      params.config.maxItemsPerList,
-    );
+    const repaired = cleanSummaryMemoryAgainstSharedInstructions({
+      doc: parseSummaryMemoryYaml(repairOutput, Number.MAX_SAFE_INTEGER),
+      sharedInstructionTexts: params.sharedInstructionTexts || [],
+      maxItemsPerList: params.config.maxItemsPerList,
+    });
     return {
       yaml: stringifySummaryMemoryYaml(repaired),
       repaired: true,

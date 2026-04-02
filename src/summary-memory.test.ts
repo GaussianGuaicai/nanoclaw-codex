@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   buildSummaryUpdatePrompt,
+  cleanSummaryMemoryAgainstSharedInstructions,
   getDefaultSummaryYaml,
   parseSummaryMemoryYaml,
   stripYamlFences,
@@ -105,5 +106,126 @@ describe('summary-memory', () => {
     ).rejects.toThrow('network down');
 
     expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes shared-instruction duplicates and generic prompt rules', () => {
+    const cleaned = cleanSummaryMemoryAgainstSharedInstructions({
+      doc: parseSummaryMemoryYaml(
+        [
+          'session_state:',
+          '  task: "Track preferences"',
+          '  decisions:',
+          '    - When the user arrives home, mention that the computer is usually already opened automatically, but do not trigger anything yourself.',
+          '    - Return YAML only.',
+          '    - Decide whether this run needs a user-facing reply.',
+          '    - Keep the living room comfortable.',
+          '  constraints:',
+          '    - Do not use markdown fences.',
+          '    - If the task completed successfully but nothing needs to be surfaced now, return only <internal>...</internal> content.',
+          '  active_entities: []',
+          '  open_questions: []',
+          '  important_paths: []',
+          '  recent_failures: []',
+          '  user_preferences:',
+          '    - Treat `Home-WiFi*` as home Wi-Fi.',
+          '    - If the user should be informed, send a concise user-facing update suitable for the target channel.',
+          '    - The user prefers terse status updates.',
+        ].join('\n'),
+        10,
+      ),
+      sharedInstructionTexts: [
+        [
+          '- Treat `Home-WiFi*` as home Wi-Fi.',
+          '- When the user arrives home, mention that the computer is usually already opened automatically, but do not trigger anything yourself.',
+        ].join('\n'),
+      ],
+      maxItemsPerList: 10,
+    });
+
+    expect(cleaned.session_state.decisions).toEqual([
+      'Keep the living room comfortable.',
+    ]);
+    expect(cleaned.session_state.constraints).toEqual([]);
+    expect(cleaned.session_state.user_preferences).toEqual([
+      'The user prefers terse status updates.',
+    ]);
+  });
+
+  it('cleans duplicates against shared instructions after update', async () => {
+    const updated = await updateSummaryMemory({
+      currentSummaryYaml: getDefaultSummaryYaml(),
+      deltaTurns: [],
+      sharedInstructionTexts: ['- Treat `Home-WiFi*` as home Wi-Fi.'],
+      config: {
+        enabled: true,
+        model: 'gpt-5.4-mini',
+        reasoningEffort: 'low',
+        updateMinTurns: 2,
+        maxItemsPerList: 4,
+      },
+      invoke: async () =>
+        [
+          'session_state:',
+          '  task: "Track state"',
+          '  decisions: []',
+          '  constraints: []',
+          '  active_entities: []',
+          '  open_questions: []',
+          '  important_paths: []',
+          '  recent_failures: []',
+          '  user_preferences:',
+          '    - Treat `Home-WiFi*` as home Wi-Fi.',
+          '    - Prefer short updates.',
+        ].join('\n'),
+    });
+
+    expect(updated.yaml).not.toContain('Treat `Home-WiFi*` as home Wi-Fi.');
+    expect(updated.yaml).toContain('Prefer short updates.');
+  });
+
+  it('filters summary list entries before applying the max-items limit', async () => {
+    const updated = await updateSummaryMemory({
+      currentSummaryYaml: getDefaultSummaryYaml(),
+      deltaTurns: [],
+      sharedInstructionTexts: ['- Keep services on the host when possible.'],
+      config: {
+        enabled: true,
+        model: 'gpt-5.4-mini',
+        reasoningEffort: 'low',
+        updateMinTurns: 2,
+        maxItemsPerList: 3,
+      },
+      invoke: async () =>
+        [
+          'session_state:',
+          '  task: "Track state"',
+          '  decisions:',
+          '    - Keep services on the host when possible.',
+          '    - Return YAML only.',
+          '    - Preserve the SQLite-first verification flow.',
+          '    - Keep Home Assistant filters restricted to device_tracker.* entities.',
+          '    - Route deliverOutput replies back through the owning channel.',
+          '  constraints: []',
+          '  active_entities: []',
+          '  open_questions: []',
+          '  important_paths: []',
+          '  recent_failures: []',
+          '  user_preferences: []',
+        ].join('\n'),
+    });
+
+    expect(updated.yaml).toContain(
+      'Preserve the SQLite-first verification flow.',
+    );
+    expect(updated.yaml).toContain(
+      'Keep Home Assistant filters restricted to device_tracker.* entities.',
+    );
+    expect(updated.yaml).toContain(
+      'Route deliverOutput replies back through the owning channel.',
+    );
+    expect(updated.yaml).not.toContain(
+      'Keep services on the host when possible.',
+    );
+    expect(updated.yaml).not.toContain('Return YAML only.');
   });
 });

@@ -126,7 +126,7 @@ Precedence:
 
 Per-group Codex state lives under `data/sessions/{group}/.codex`. That directory is used as `CODEX_HOME`, so each group gets isolated session history, auth state, logs, and local Codex metadata.
 
-Structured session memory is configured separately through `~/.config/nanoclaw/context-config.json`. It is off by default, and when enabled it records per-group turns, maintains a YAML summary, and can compact old context. See [docs/CONTEXT_MEMORY.md](docs/CONTEXT_MEMORY.md) and the `/context-memory` skill.
+Structured session memory is configured separately through `~/.config/nanoclaw/context-config.json`. It is off by default, and when enabled it records per-group turns, maintains a YAML summary, injects a `CONTEXT_BUNDLE` on fresh sessions, injects a lighter `MEMORY_REFRESH` on resumed sessions, and can compact old context with budgeted recent-turn selection. See [docs/CONTEXT_MEMORY.md](docs/CONTEXT_MEMORY.md) and the `$context-memory` skill.
 
 ## Remote MCP and Event Sources
 
@@ -165,7 +165,7 @@ The runtime defaults to `workspace-write` sandbox mode with `approval_policy=nev
 
 - Group-isolated memory via `groups/*/AGENTS.md`
 - Per-group Codex session state via `data/sessions/*/.codex`
-- Structured session memory and sliding-window compaction via `~/.config/nanoclaw/context-config.json`
+- Structured session memory with `CONTEXT_BUNDLE`, `MEMORY_REFRESH`, and sliding-window compaction via `~/.config/nanoclaw/context-config.json`
 - Scheduled tasks that run through the same local worker
 - File-based IPC between the host orchestrator and the worker MCP server
 - Per-group remote MCP server attachments
@@ -253,7 +253,7 @@ See [docs/SECURITY.md](docs/SECURITY.md) for the current model.
 
 ## FAQ
 
-**Do I still need Claude Code if runtime is Codex?**
+**Do I still need the old Claude Code workflow if runtime is Codex?**
 
 No. The recommended host workflow is now Codex: install the Codex CLI, create the `.agents/skills` symlink, open the repo with `codex`, and run repo skills with `$setup`, `$customize`, and the other `$skill-name` commands.
 

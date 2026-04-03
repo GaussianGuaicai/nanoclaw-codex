@@ -297,6 +297,13 @@ describe('container-runner worker execution', () => {
           includePrompt: true,
           includeResult: true,
         },
+        contextDebug: {
+          bootstrapUsed: true,
+          memoryRefreshUsed: false,
+          summaryIncluded: true,
+          recentTurnsScope: 'source-only',
+          recentTurnCount: 3,
+        },
       },
       () => {},
       async () => {},
@@ -328,9 +335,17 @@ describe('container-runner worker execution', () => {
       /Timestamp: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}/,
     );
     expect(logWrite?.[1]).toContain('=== Shared Instructions ===');
+    expect(logWrite?.[1]).toContain('=== Context Summary ===');
+    expect(logWrite?.[1]).toContain('Bootstrap Used: true');
+    expect(logWrite?.[1]).toContain('Memory Refresh Used: false');
+    expect(logWrite?.[1]).toContain('Summary Included: true');
+    expect(logWrite?.[1]).toContain('Recent Turns Scope: source-only');
+    expect(logWrite?.[1]).toContain('Recent Turn Count: 3');
     expect(logWrite?.[1]).toContain(
-      '/tmp/nanoclaw-test-groups/test-group/preferences.md',
+      'Rule Priority: CURRENT_INPUT > Shared Instructions > Structured Summary > Recent Turns > Session Background',
     );
+    expect(logWrite?.[1]).toContain('preferences.md');
+    expect(logWrite?.[1]).not.toContain('/tmp/nanoclaw-test-groups/test-group');
     expect(logWrite?.[1]).toContain('WebSocket-triggered prompt body');
     expect(logWrite?.[1]).toContain('=== Result ===');
     expect(logWrite?.[1]).toContain('No user-facing action needed.');
@@ -561,9 +576,8 @@ describe('container-runner worker execution', () => {
     );
     expect(timeoutLog).toBeDefined();
     expect(String(timeoutLog?.[1])).toContain('=== Shared Instructions ===');
-    expect(String(timeoutLog?.[1])).toContain(
-      '/tmp/nanoclaw-test-groups/test-group/preferences.md',
-    );
+    expect(String(timeoutLog?.[1])).toContain('preferences.md');
+    expect(String(timeoutLog?.[1])).not.toContain('/tmp/nanoclaw-test-groups');
   });
 
   it('launches a local worker and injects runtimePaths into the worker input', async () => {

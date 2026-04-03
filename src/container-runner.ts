@@ -19,6 +19,10 @@ import { resolveGroupWorkerEnv } from './group-secrets.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import {
+  dedupeInstructionPaths,
+  findInstructionFiles,
+} from './shared-instructions.js';
+import {
   formatLocalIsoTimestamp,
   formatLocalTimestampForFilename,
 } from './time.js';
@@ -59,6 +63,13 @@ export interface ContainerInput {
   workerLogDetail?: {
     includePrompt?: boolean;
     includeResult?: boolean;
+  };
+  contextDebug?: {
+    bootstrapUsed: boolean;
+    memoryRefreshUsed: boolean;
+    summaryIncluded: boolean;
+    recentTurnsScope: 'shared' | 'source-only' | 'none';
+    recentTurnCount: number;
   };
   maintenancePurpose?: 'summary-memory';
   suppressConversationArchive?: boolean;
@@ -258,6 +269,9 @@ function redactRemoteMcpServersForLogging(
 function redactWorkerInputForLogging(input: ContainerInput): ContainerInput {
   return {
     ...input,
+    runtimePaths: input.runtimePaths
+      ? sanitizeAgentRuntimePathsForLogging(input.runtimePaths)
+      : input.runtimePaths,
     remoteMcpServers: redactRemoteMcpServersForLogging(input.remoteMcpServers),
     ...(input.sdkSecrets
       ? {
@@ -274,6 +288,74 @@ function redactWorkerInputForLogging(input: ContainerInput): ContainerInput {
         }
       : {}),
   };
+}
+
+function sanitizeWorkerLogPath(filePath: string): string {
+  const normalized = path.normalize(filePath);
+  const relative = path.relative(process.cwd(), normalized);
+
+  if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) {
+    return relative;
+  }
+
+  return path.basename(normalized) || normalized;
+}
+
+function sanitizeAgentRuntimePathsForLogging(
+  runtimePaths: AgentRuntimePaths,
+): AgentRuntimePaths {
+  return {
+    groupPath: sanitizeWorkerLogPath(runtimePaths.groupPath),
+    ipcPath: sanitizeWorkerLogPath(runtimePaths.ipcPath),
+    codexHome: sanitizeWorkerLogPath(runtimePaths.codexHome),
+    additionalDirectories: runtimePaths.additionalDirectories.map(
+      sanitizeWorkerLogPath,
+    ),
+    writableRoots: runtimePaths.writableRoots.map(sanitizeWorkerLogPath),
+    sharedInstructionFiles: runtimePaths.sharedInstructionFiles.map(
+      sanitizeWorkerLogPath,
+    ),
+  };
+}
+
+function sanitizeAgentExecutionLayoutForLogging(
+  layout: AgentExecutionLayout,
+): AgentExecutionLayout {
+  return {
+    ...layout,
+    ...sanitizeAgentRuntimePathsForLogging(layout),
+    snapshotMappings: layout.snapshotMappings.map((mapping) => ({
+      ...mapping,
+      sourcePath: sanitizeWorkerLogPath(mapping.sourcePath),
+      targetPath: sanitizeWorkerLogPath(mapping.targetPath),
+    })),
+  };
+}
+
+function buildContextLogLines(input: ContainerInput): string[] {
+  if (!input.contextDebug) {
+    return [
+      '=== Context Summary ===',
+      'Bootstrap Used: unknown',
+      'Memory Refresh Used: unknown',
+      'Summary Included: unknown',
+      'Recent Turns Scope: unknown',
+      'Recent Turn Count: unknown',
+      'Rule Priority: CURRENT_INPUT > Shared Instructions > Structured Summary > Recent Turns > Session Background',
+      '',
+    ];
+  }
+
+  return [
+    '=== Context Summary ===',
+    `Bootstrap Used: ${input.contextDebug.bootstrapUsed}`,
+    `Memory Refresh Used: ${input.contextDebug.memoryRefreshUsed}`,
+    `Summary Included: ${input.contextDebug.summaryIncluded}`,
+    `Recent Turns Scope: ${input.contextDebug.recentTurnsScope}`,
+    `Recent Turn Count: ${input.contextDebug.recentTurnCount}`,
+    'Rule Priority: CURRENT_INPUT > Shared Instructions > Structured Summary > Recent Turns > Session Background',
+    '',
+  ];
 }
 
 function ensureGroupRuntimeDirs(groupFolder: string): {
@@ -332,46 +414,7 @@ function copySnapshot(
 }
 
 function dedupePaths(paths: string[]): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-
-  for (const value of paths) {
-    const resolved = path.resolve(value);
-    if (seen.has(resolved)) continue;
-    seen.add(resolved);
-    result.push(resolved);
-  }
-
-  return result;
-}
-
-function findInstructionFiles(rootPath: string): string[] {
-  const filenames = ['AGENTS.md', 'CLAUDE.md', 'preferences.md'];
-  const nestedRoot = path.join(rootPath, 'groups', path.basename(rootPath));
-  const rootCandidates = filenames.map((filename) =>
-    path.join(rootPath, filename),
-  );
-  const legacyCandidates = filenames
-    .map((filename) => {
-      const rootCandidate = path.join(rootPath, filename);
-      const legacyCandidate = path.join(nestedRoot, filename);
-      if (fs.existsSync(rootCandidate)) {
-        return null;
-      }
-      return legacyCandidate;
-    })
-    .filter((candidate): candidate is string => candidate !== null);
-  const candidates = [...rootCandidates, ...legacyCandidates];
-
-  const files: string[] = [];
-  for (const candidate of candidates) {
-    if (!fs.existsSync(candidate)) continue;
-    const content = fs.readFileSync(candidate, 'utf-8').trim();
-    if (!content) continue;
-    files.push(candidate);
-  }
-
-  return files;
+  return dedupeInstructionPaths(paths);
 }
 
 function resolveSnapshotTarget(
@@ -548,6 +591,7 @@ export async function runContainerAgent(
 
   const layout = buildAgentExecutionLayout(group, input.isMain);
   input.runtimePaths = layout;
+  const loggableLayout = sanitizeAgentExecutionLayoutForLogging(layout);
   const remoteMcpEnv = loadRemoteMcpEnv(group.containerConfig?.mcpServers);
   input.remoteMcpServers = sanitizeRemoteMcpServers(
     group.containerConfig?.mcpServers,
@@ -570,7 +614,7 @@ export async function runContainerAgent(
       executionName,
       command: launch.command,
       args: launch.args,
-      layout,
+      layout: loggableLayout,
     },
     'Agent execution configuration',
   );
@@ -580,8 +624,8 @@ export async function runContainerAgent(
       group: group.name,
       executionName,
       isMain: input.isMain,
-      writableRoots: layout.writableRoots,
-      additionalDirectories: layout.additionalDirectories,
+      writableRoots: loggableLayout.writableRoots,
+      additionalDirectories: loggableLayout.additionalDirectories,
     },
     'Spawning local Codex worker',
   );
@@ -719,6 +763,8 @@ export async function runContainerAgent(
         const now = new Date();
         const ts = formatLocalTimestampForFilename(now);
         const timeoutLog = path.join(logsDir, `worker-${ts}.log`);
+        const loggableTimeoutLayout =
+          sanitizeAgentExecutionLayoutForLogging(layout);
         fs.writeFileSync(
           timeoutLog,
           [
@@ -730,7 +776,7 @@ export async function runContainerAgent(
             `Exit Code: ${code}`,
             `Had Streaming Output: ${hadStreamingOutput}`,
             '=== Shared Instructions ===',
-            layout.sharedInstructionFiles.join('\n') || '(none)',
+            loggableTimeoutLayout.sharedInstructionFiles.join('\n') || '(none)',
           ].join('\n'),
         );
 
@@ -809,14 +855,15 @@ export async function runContainerAgent(
           `Prompt length: ${input.prompt.length} chars`,
           `Session ID: ${input.sessionId || 'new'}`,
           '',
+          ...buildContextLogLines(input),
           '=== Additional Directories ===',
-          layout.additionalDirectories.join('\n') || '(none)',
+          loggableLayout.additionalDirectories.join('\n') || '(none)',
           '',
           '=== Writable Roots ===',
-          layout.writableRoots.join('\n') || '(none)',
+          loggableLayout.writableRoots.join('\n') || '(none)',
           '',
           '=== Shared Instructions ===',
-          layout.sharedInstructionFiles.join('\n') || '(none)',
+          loggableLayout.sharedInstructionFiles.join('\n') || '(none)',
           '',
         );
 

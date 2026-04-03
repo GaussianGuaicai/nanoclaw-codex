@@ -1,5 +1,9 @@
 # NanoClaw Skills Architecture
 
+> Note
+> This is a historical design draft for the earlier Claude Code-driven skill system.
+> It does not fully describe the current Codex-based runtime, setup flow, or worker architecture.
+
 ## What Skills Are For
 
 NanoClaw's core is intentionally minimal. Skills are how users extend it: adding channels, integrations, cross-platform support, or replacing internals entirely. Examples: add Telegram alongside WhatsApp, switch from Apple Container to Docker, add Gmail integration, add voice message transcription. Each skill modifies the actual codebase, adding channel handlers, updating the message router, changing container configuration, and adding dependencies, rather than working through a plugin API or runtime hooks.

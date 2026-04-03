@@ -478,7 +478,12 @@ export function updateTask(
   updates: Partial<
     Pick<
       ScheduledTask,
-      'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status'
+      | 'prompt'
+      | 'schedule_type'
+      | 'schedule_value'
+      | 'next_run'
+      | 'status'
+      | 'agent_config'
     >
   >,
 ): void {
@@ -504,6 +509,12 @@ export function updateTask(
   if (updates.status !== undefined) {
     fields.push('status = ?');
     values.push(updates.status);
+  }
+  if (updates.agent_config !== undefined) {
+    fields.push('agent_config = ?');
+    values.push(
+      updates.agent_config ? JSON.stringify(updates.agent_config) : null,
+    );
   }
 
   if (fields.length === 0) return;

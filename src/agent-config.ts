@@ -78,7 +78,7 @@ function parseErrorMessage(error: z.ZodError): string {
     .join('; ');
 }
 
-function mergeConfig(
+export function mergeAgentExecutionConfig(
   base: AgentExecutionConfig,
   next?: AgentExecutionConfig,
 ): AgentExecutionConfig {
@@ -96,14 +96,54 @@ function mergeConfig(
   };
 }
 
+export function mergeAgentExecutionSourceConfig(
+  base: AgentExecutionSourceConfig | undefined,
+  next?: AgentExecutionSourceConfig,
+): AgentExecutionSourceConfig | undefined {
+  if (!next) return base;
+
+  const merged: AgentExecutionSourceConfig = { ...(base || {}) };
+
+  if (next.defaults !== undefined) {
+    merged.defaults = mergeAgentExecutionConfig(
+      base?.defaults || {},
+      next.defaults,
+    );
+  }
+
+  if (next.bySource !== undefined) {
+    merged.bySource = { ...(base?.bySource || {}) };
+    if (next.bySource.chat !== undefined) {
+      merged.bySource.chat = mergeAgentExecutionConfig(
+        base?.bySource?.chat || {},
+        next.bySource.chat,
+      );
+    }
+    if (next.bySource.scheduled !== undefined) {
+      merged.bySource.scheduled = mergeAgentExecutionConfig(
+        base?.bySource?.scheduled || {},
+        next.bySource.scheduled,
+      );
+    }
+    if (next.bySource.websocket !== undefined) {
+      merged.bySource.websocket = mergeAgentExecutionConfig(
+        base?.bySource?.websocket || {},
+        next.bySource.websocket,
+      );
+    }
+  }
+
+  return merged;
+}
+
 function applySourceLayer(
   current: AgentExecutionConfig,
   source: AgentTaskSource,
   layer?: AgentExecutionSourceConfig | null,
 ): AgentExecutionConfig {
   if (!layer) return current;
-  return mergeConfig(
-    mergeConfig(current, layer.defaults),
+  return mergeAgentExecutionConfig(
+    mergeAgentExecutionConfig(current, layer.defaults),
     layer.bySource?.[source],
   );
 }
@@ -171,6 +211,10 @@ export function initializeGlobalAgentConfig(): GlobalAgentConfigState {
 }
 
 export function resetGlobalAgentConfigForTests(): void {
+  cachedGlobalConfig = null;
+}
+
+export function resetGlobalAgentConfigCache(): void {
   cachedGlobalConfig = null;
 }
 
@@ -249,12 +293,15 @@ export function resolveAgentExecutionConfig(
   if (!taskOverride.ok) return taskOverride;
 
   let resolved: AgentExecutionConfig = {};
-  resolved = mergeConfig(resolved, readLegacyDefaults());
+  resolved = mergeAgentExecutionConfig(resolved, readLegacyDefaults());
   resolved = applySourceLayer(resolved, options.source, globalState.config);
-  resolved = mergeConfig(resolved, sourceDefaults[options.source]);
+  resolved = mergeAgentExecutionConfig(
+    resolved,
+    sourceDefaults[options.source],
+  );
   resolved = applySourceLayer(resolved, options.source, groupLayer.value);
-  resolved = mergeConfig(resolved, websocketOverride.value);
-  resolved = mergeConfig(resolved, taskOverride.value);
+  resolved = mergeAgentExecutionConfig(resolved, websocketOverride.value);
+  resolved = mergeAgentExecutionConfig(resolved, taskOverride.value);
 
   return { ok: true, config: resolved };
 }

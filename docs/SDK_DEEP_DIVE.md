@@ -1,5 +1,9 @@
 # Claude Agent SDK Deep Dive
 
+> Note
+> Historical reverse-engineering notes for the pre-Codex runtime.
+> The current NanoClaw runtime uses the local Codex worker described in `README.md`, `docs/SECURITY.md`, and `docs/CONTEXT_MEMORY.md`.
+
 Findings from reverse-engineering `@anthropic-ai/claude-agent-sdk` v0.2.29–0.2.34 to understand how `query()` works, why agent teams subagents were being killed, and how to fix it. Supplemented with official SDK reference docs.
 
 ## Architecture

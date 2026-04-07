@@ -36,7 +36,7 @@ import {
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 const EXTRA_SNAPSHOT_PREFIX = '/workspace/extra/';
-const MAX_WORKER_LOG_TEXT = 8000;
+const MAX_WORKER_LOG_TEXT = 30000;
 const TRUNCATED_MARKER = '[TRUNCATED]';
 
 export interface AgentRuntimePaths {
@@ -134,9 +134,12 @@ function buildContextAwarePromptPreview(
   }
 
   const prefix = prompt.slice(0, recentTurnsContentStart);
-  const recentTurnsBody = prompt.slice(recentTurnsContentStart, currentInputIndex);
+  const recentTurnsBody = prompt.slice(
+    recentTurnsContentStart,
+    currentInputIndex,
+  );
   const suffix = prompt.slice(currentInputIndex);
-  const markerBlock = `${TRUNCATED_MARKER}\n`;
+  const markerBlock = `${TRUNCATED_MARKER}: prompt preview omitted older recent turns to preserve CURRENT_INPUT\n`;
   const fixedLength = prefix.length + suffix.length + markerBlock.length;
 
   if (fixedLength >= maxChars) {
@@ -145,8 +148,12 @@ function buildContextAwarePromptPreview(
       return `${markerBlock}${prompt.slice(-tailBudget)}`.slice(0, maxChars);
     }
 
-    const prefixBudget = Math.max(0, maxChars - suffix.length - markerBlock.length);
-    return `${prefix.slice(0, prefixBudget)}${markerBlock}${suffix}`;
+    const prefixBudget = Math.max(
+      0,
+      maxChars - suffix.length - markerBlock.length,
+    );
+    const prefixPreview = trimToLineBoundary(prefix, prefixBudget);
+    return `${prefixPreview}${markerBlock}${suffix}`;
   }
 
   const recentTurnsBudget = maxChars - fixedLength;
@@ -183,6 +190,20 @@ function trimRecentTurnsBodyFromFront(text: string, maxChars: number): string {
   }
 
   return rawTail;
+}
+
+function trimToLineBoundary(text: string, maxChars: number): string {
+  if (text.length <= maxChars) {
+    return text;
+  }
+
+  const preview = text.slice(0, maxChars);
+  const lastNewline = preview.lastIndexOf('\n');
+  if (lastNewline <= 0) {
+    return preview.endsWith('\n') ? preview : `${preview}\n`;
+  }
+
+  return preview.slice(0, lastNewline + 1);
 }
 
 function loadRemoteMcpEnv(

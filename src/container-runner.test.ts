@@ -367,17 +367,17 @@ describe('container-runner worker execution', () => {
       '  source: websocket',
       '  at: 2026-04-01T00:00:00.000Z',
       '  content: |',
-      `    OLDER TURN MARKER ${'A'.repeat(7000)}`,
+      `    OLDER TURN MARKER ${'A'.repeat(28000)}`,
       '- role: assistant',
       '  source: websocket',
       '  at: 2026-04-03T00:00:00.000Z',
       '  content: |',
-      `    NEWER TURN MARKER ${'B'.repeat(2000)}`,
+      `    NEWER TURN MARKER ${'B'.repeat(4000)}`,
       '',
       'CURRENT_INPUT:',
       'source: websocket',
       'content: |',
-      `  CURRENT INPUT MARKER ${'C'.repeat(1500)}`,
+      `  CURRENT INPUT MARKER ${'C'.repeat(6000)}`,
     ].join('\n');
 
     const resultPromise = runContainerAgent(
@@ -413,7 +413,9 @@ describe('container-runner worker execution', () => {
 
     expect(logText).toContain('=== Prompt ===');
     expect(logText).toContain('RECENT_TURNS:');
-    expect(logText).toContain('[TRUNCATED]');
+    expect(logText).toContain(
+      '[TRUNCATED]: prompt preview omitted older recent turns to preserve CURRENT_INPUT',
+    );
     expect(logText).not.toContain('OLDER TURN MARKER');
     expect(logText).toContain('NEWER TURN MARKER');
     expect(logText).toContain('CURRENT_INPUT:');

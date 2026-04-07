@@ -72,7 +72,7 @@ Detailed summary and compaction audit state lives in `context_memory_events`. Wo
 2. Restart the NanoClaw launchd service.
 3. Send a chat message or trigger a WebSocket event for a group that uses `contextMode: "group"`.
 4. Check `store/messages.db` for `context_turns` and `group_memory_state`.
-5. Inspect `context_memory_events` for the summary maintenance audit trail.
+5. Inspect `context_memory_events` for the summary and compaction audit trail.
 6. Inspect `groups/<group>/logs/worker-*.log` for the latest context summary lines:
    - fresh session: `Bootstrap Used: true`
    - resumed session: `Memory Refresh Used: true`

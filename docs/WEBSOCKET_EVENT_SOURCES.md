@@ -47,6 +47,8 @@ The host file may still contain legacy `subscriptions`, but the preferred flow i
 
 Group-owned subscriptions must not include `targetJid` or `taskInstructionsPath`; NanoClaw injects `targetJid` from the group folder's registration, and group-owned instructions should use inline `taskInstructions`. Use `config-examples/websocket-sources.home-assistant.json` as a Home Assistant-oriented starting point for connection and subscription fields.
 
+When using the host-backed config inspection/apply flow, pass the subscription id plus the owning `targetJid` to update a group-owned subscription file. Omitting `targetJid` continues to target the legacy host-level `subscriptions` array.
+
 ## Supported v1 behavior
 
 - Client mode only. NanoClaw connects out to external WebSocket APIs.

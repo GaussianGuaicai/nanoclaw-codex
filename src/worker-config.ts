@@ -108,6 +108,9 @@ export function startWorkerConfigWatcher(options: {
       const stamp = readStamp(group.folder);
       if (!lastSeen.has(group.folder)) {
         lastSeen.set(group.folder, stamp);
+        if (initialized && stamp !== 'missing:missing') {
+          changed = true;
+        }
         continue;
       }
       if (lastSeen.get(group.folder) !== stamp) {

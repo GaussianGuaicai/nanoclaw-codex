@@ -12,11 +12,12 @@ const { readEnvFileMock, tempRoot, paths } = vi.hoisted(() => {
     paths: {
       agentConfigPath: `${configRoot}/agent-config.json`,
       contextConfigPath: `${configRoot}/context-config.json`,
-      websocketSourcesPath: `${configRoot}/websocket-sources.json`,
-      logsDir: `${tempRoot}/logs`,
-      storeDir: `${tempRoot}/store`,
-      dataDir: `${tempRoot}/data`,
-    },
+    websocketSourcesPath: `${configRoot}/websocket-sources.json`,
+    logsDir: `${tempRoot}/logs`,
+    storeDir: `${tempRoot}/store`,
+    dataDir: `${tempRoot}/data`,
+    groupsDir: `${tempRoot}/groups`,
+  },
   };
 });
 
@@ -36,6 +37,7 @@ vi.mock('./config.js', async () => {
     LOGS_DIR: paths.logsDir,
     DATA_DIR: paths.dataDir,
     STORE_DIR: paths.storeDir,
+    GROUPS_DIR: paths.groupsDir,
   };
 });
 
@@ -86,10 +88,12 @@ function ensureParentDirs(): void {
   fs.mkdirSync(paths.logsDir, { recursive: true });
   fs.mkdirSync(paths.storeDir, { recursive: true });
   fs.mkdirSync(paths.dataDir, { recursive: true });
+  fs.mkdirSync(paths.groupsDir, { recursive: true });
 }
 
 function writeJson(filePath: string, value: unknown): void {
   ensureParentDirs();
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
@@ -441,5 +445,263 @@ describe('config mutations', () => {
     expect(getTaskById('task-unset')?.agent_config).toEqual({
       model: 'gpt-5.4',
     });
+  });
+
+  it('preserves colon characters in unified target identifiers', async () => {
+    const slackGroup: RegisteredGroup = {
+      name: 'Slack Main',
+      folder: 'slack-main',
+      trigger: '@Andy',
+      added_at: '2026-01-01T00:00:00.000Z',
+    };
+    registeredGroups['slack:C123'] = slackGroup;
+    setRegisteredGroup('slack:C123', slackGroup);
+
+    const result = await applyConfigUpdate(
+      {
+        target: 'agent/group:slack:C123',
+        domain: 'agent',
+        scope: 'group',
+        changes: {
+          defaults: {
+            model: 'gpt-5.4-mini',
+          },
+        },
+        reason: 'support channel-prefixed ids',
+        actorGroup: 'main',
+        isMain: true,
+      },
+      deps,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(registeredGroups['slack:C123'].containerConfig?.agentConfig).toEqual({
+      defaults: {
+        model: 'gpt-5.4-mini',
+      },
+    });
+  });
+
+  it('rejects websocket updates that remove required subscription fields', async () => {
+    writeJson(paths.websocketSourcesPath, {
+      connections: {
+        ha_main: {
+          provider: 'home_assistant',
+          urlEnvVar: 'TEST_HA_URL',
+          tokenEnvVar: 'TEST_HA_TOKEN',
+        },
+      },
+      subscriptions: [
+        {
+          id: 'front-door',
+          connection: 'ha_main',
+          kind: 'events',
+          eventType: 'state_changed',
+          targetJid: 'main@g.us',
+          promptTemplate: 'Handle {{event_type}}',
+        },
+      ],
+    });
+
+    const result = await applyConfigUpdate(
+      {
+        domain: 'websocket',
+        scope: 'subscription',
+        subscriptionId: 'front-door',
+        changes: {
+          deliverOutput: true,
+        },
+        unsetPaths: ['promptTemplate'],
+        reason: 'should fail validation',
+        actorGroup: 'main',
+        isMain: true,
+      },
+      deps,
+    );
+
+    expect(result.ok).toBe(false);
+    expect(
+      JSON.parse(fs.readFileSync(paths.websocketSourcesPath, 'utf-8'))
+        .subscriptions[0],
+    ).toMatchObject({
+      id: 'front-door',
+      promptTemplate: 'Handle {{event_type}}',
+    });
+  });
+
+  it('redacts sensitive config values from the change log', async () => {
+    const result = await applyConfigUpdate(
+      {
+        domain: 'agent',
+        scope: 'global',
+        changes: {
+          defaults: {
+            model: 'gpt-5.4-mini',
+            codexConfigOverrides: {
+              api_key: 'secret',
+            },
+          },
+        },
+        reason: 'verify redaction',
+        actorGroup: 'main',
+        isMain: true,
+      },
+      deps,
+    );
+
+    expect(result.ok).toBe(true);
+    const changeLog = fs.readFileSync(
+      path.join(paths.logsDir, 'config-changes.log'),
+      'utf-8',
+    );
+    expect(changeLog).toContain('"codexConfigOverrides":"[REDACTED]"');
+    expect(changeLog).not.toContain('secret');
+  });
+
+  it('updates a group-owned websocket subscription for a target group', async () => {
+    writeJson(
+      path.join(paths.groupsDir, 'other-group', 'config', 'websocket-sources.json'),
+      {
+        subscriptions: [
+          {
+            id: 'group-front-door',
+            connection: 'ha_main',
+            eventType: 'state_changed',
+            promptTemplate: 'Handle {{event_type}}',
+            deliverOutput: false,
+          },
+        ],
+      },
+    );
+
+    const result = await applyConfigUpdate(
+      {
+        domain: 'websocket',
+        scope: 'subscription',
+        targetJid: 'other@g.us',
+        subscriptionId: 'group-front-door',
+        changes: {
+          deliverOutput: true,
+          cooldownMs: 3000,
+        },
+        reason: 'promote group-owned path',
+        actorGroup: 'main',
+        isMain: true,
+      },
+      deps,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.target).toBe(
+      'websocket/subscription:group-front-door@other@g.us',
+    );
+    expect(
+      JSON.parse(
+        fs.readFileSync(
+          path.join(
+            paths.groupsDir,
+            'other-group',
+            'config',
+            'websocket-sources.json',
+          ),
+          'utf-8',
+        ),
+      ),
+    ).toEqual({
+      subscriptions: [
+        {
+          id: 'group-front-door',
+          connection: 'ha_main',
+          eventType: 'state_changed',
+          promptTemplate: 'Handle {{event_type}}',
+          deliverOutput: true,
+          cooldownMs: 3000,
+        },
+      ],
+    });
+  });
+
+  it('allows a non-main group to update its own group-owned websocket subscription', async () => {
+    writeJson(
+      path.join(paths.groupsDir, 'other-group', 'config', 'websocket-sources.json'),
+      {
+        subscriptions: [
+          {
+            id: 'group-self',
+            connection: 'ha_main',
+            eventType: 'state_changed',
+            promptTemplate: 'Self handler',
+          },
+        ],
+      },
+    );
+
+    const result = await applyConfigUpdate(
+      {
+        domain: 'websocket',
+        scope: 'subscription',
+        targetJid: 'other@g.us',
+        subscriptionId: 'group-self',
+        changes: {
+          logTaskResult: true,
+        },
+        reason: 'self update',
+        actorGroup: 'other-group',
+        isMain: false,
+      },
+      deps,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(
+      JSON.parse(
+        fs.readFileSync(
+          path.join(
+            paths.groupsDir,
+            'other-group',
+            'config',
+            'websocket-sources.json',
+          ),
+          'utf-8',
+        ),
+      ).subscriptions[0],
+    ).toMatchObject({
+      id: 'group-self',
+      logTaskResult: true,
+    });
+  });
+
+  it('rejects non-main updates to another groups group-owned websocket subscription', async () => {
+    writeJson(
+      path.join(paths.groupsDir, 'other-group', 'config', 'websocket-sources.json'),
+      {
+        subscriptions: [
+          {
+            id: 'group-locked',
+            connection: 'ha_main',
+            eventType: 'state_changed',
+            promptTemplate: 'Locked handler',
+          },
+        ],
+      },
+    );
+
+    const result = await applyConfigUpdate(
+      {
+        domain: 'websocket',
+        scope: 'subscription',
+        targetJid: 'other@g.us',
+        subscriptionId: 'group-locked',
+        changes: {
+          deliverOutput: true,
+        },
+        reason: 'unauthorized update',
+        actorGroup: 'main',
+        isMain: false,
+      },
+      deps,
+    );
+
+    expect(result.ok).toBe(false);
   });
 });

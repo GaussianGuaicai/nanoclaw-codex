@@ -24,6 +24,7 @@ import { getTaskById, setRegisteredGroup, updateTask } from './db.js';
 import { logger } from './logger.js';
 import { formatLocalIsoTimestamp } from './time.js';
 import { agentExecutionConfigSchema } from './agent-config.js';
+import { getWorkerWebSocketSourcesPath } from './worker-config.js';
 import type {
   AgentExecutionConfig,
   AgentExecutionSourceConfig,
@@ -180,6 +181,12 @@ const websocketRawRootSchema = z
   })
   .passthrough();
 
+const groupWebsocketRootSchema = z
+  .object({
+    subscriptions: z.array(z.unknown()).default([]),
+  })
+  .strict();
+
 const websocketSubscriptionBaseSchema = z
   .object({
     id: z.string().min(1),
@@ -190,6 +197,28 @@ const websocketSubscriptionBaseSchema = z
     promptTemplate: z.string().min(1),
   })
   .passthrough();
+
+const websocketSubscriptionSchema = websocketSubscriptionBaseSchema.extend({
+  filters: z.array(z.unknown()).optional(),
+  match: z.record(z.string(), z.unknown()).optional(),
+  logFilteredEvents: z.boolean().optional(),
+  logCooldownEvents: z.boolean().optional(),
+  runTask: z.boolean().optional(),
+  logTaskResult: z.boolean().optional(),
+  taskInstructions: z.string().min(1).optional(),
+  taskInstructionsPath: z.string().min(1).optional(),
+  contextMode: z.enum(['group', 'isolated']).optional(),
+  deliverOutput: z.boolean().optional(),
+  cooldownMs: z.number().int().nonnegative().optional(),
+  agentConfig: agentExecutionConfigSchema.optional(),
+});
+
+const groupOwnedWebsocketSubscriptionSchema = websocketSubscriptionSchema
+  .omit({ targetJid: true, taskInstructionsPath: true })
+  .extend({
+    kind: z.literal('events').optional(),
+  })
+  .strict();
 
 const configChangeLogPath = path.join(LOGS_DIR, 'config-changes.log');
 
@@ -241,7 +270,11 @@ function normalizeRequestTarget(
 ): ConfigMutationRequest {
   if (!request.target) return request;
 
-  const [domainScope, identifier] = request.target.split(':', 2);
+  const separatorIndex = request.target.indexOf(':');
+  const domainScope =
+    separatorIndex >= 0 ? request.target.slice(0, separatorIndex) : request.target;
+  const identifier =
+    separatorIndex >= 0 ? request.target.slice(separatorIndex + 1) : undefined;
   const [domain, scope] = domainScope.split('/', 2);
   if (
     (domain !== 'agent' && domain !== 'context' && domain !== 'websocket') ||
@@ -338,8 +371,47 @@ function appendConfigChangeLog(entry: Record<string, unknown>): void {
   ensureParentDir(configChangeLogPath);
   fs.appendFileSync(
     configChangeLogPath,
-    `${JSON.stringify({ timestamp: formatLocalIsoTimestamp(), ...entry })}\n`,
+    `${JSON.stringify({
+      timestamp: formatLocalIsoTimestamp(),
+      ...sanitizeConfigChangeLogEntry(entry),
+    })}\n`,
   );
+}
+
+function sanitizeConfigChangeLogEntry(
+  entry: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(entry).map(([key, value]) => [key, redactSensitiveValue(value)]),
+  );
+}
+
+function redactSensitiveValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactSensitiveValue(entry));
+  }
+
+  if (!isPlainObject(value)) {
+    return value;
+  }
+
+  const redactedEntries = Object.entries(value).map(([key, entry]) => {
+    if (key === 'codexConfigOverrides') {
+      return [key, '[REDACTED]'];
+    }
+    if (key === 'taskInstructions') {
+      return [
+        key,
+        typeof entry === 'string'
+          ? `[REDACTED ${entry.length} chars]`
+          : '[REDACTED]',
+      ];
+    }
+
+    return [key, redactSensitiveValue(entry)];
+  });
+
+  return Object.fromEntries(redactedEntries);
 }
 
 function formatTargetLabel(request: ConfigMutationRequest): string {
@@ -411,6 +483,15 @@ function validateWebSocketPatch(
   return parsed.data;
 }
 
+function authorizeGroupScopedWebSocketUpdate(
+  request: ConfigMutationRequest,
+  group: RegisteredGroup,
+): void {
+  if (!request.isMain && group.folder !== request.actorGroup) {
+    throw new Error('Unauthorized websocket config update');
+  }
+}
+
 function authorizeGlobal(request: ConfigMutationRequest): void {
   if (!request.isMain) {
     throw new Error('Only the main group can modify global configuration');
@@ -470,13 +551,14 @@ function requireOwnedTask(request: ConfigMutationRequest): ScheduledTask {
 
 function requireWebSocketSubscription(
   request: ConfigMutationRequest,
-  root: z.infer<typeof websocketRawRootSchema>,
+  subscriptions: unknown[],
+  options?: { groupOwned?: boolean },
 ): Record<string, unknown> {
   if (!request.subscriptionId) {
     throw new Error('subscriptionId is required for websocket updates');
   }
 
-  const subscription = root.subscriptions.find((entry) => {
+  const subscription = subscriptions.find((entry) => {
     if (!isPlainObject(entry)) return false;
     return entry.id === request.subscriptionId;
   });
@@ -487,7 +569,10 @@ function requireWebSocketSubscription(
     );
   }
 
-  const parsed = websocketSubscriptionBaseSchema.safeParse(subscription);
+  const parsed = (options?.groupOwned
+    ? groupOwnedWebsocketSubscriptionSchema
+    : websocketSubscriptionBaseSchema
+  ).safeParse(subscription);
   if (!parsed.success) {
     throw new Error(
       `Subscription ${request.subscriptionId} is invalid and cannot be updated`,
@@ -495,6 +580,26 @@ function requireWebSocketSubscription(
   }
 
   return subscription;
+}
+
+function validateGroupOwnedWebSocketSubscription(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  if ('targetJid' in value) {
+    throw new Error('Group-owned websocket subscriptions must not include targetJid');
+  }
+  if ('taskInstructionsPath' in value) {
+    throw new Error(
+      'Group-owned websocket subscriptions must not include taskInstructionsPath',
+    );
+  }
+
+  const parsed = groupOwnedWebsocketSubscriptionSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new Error(parsed.error.issues.map((issue) => issue.message).join('; '));
+  }
+
+  return parsed.data;
 }
 
 function buildApplyFailure(
@@ -650,19 +755,84 @@ async function prepareConfigMutation(
         'WebSocket config updates only support subscription scope',
       );
     }
-    authorizeGlobal(normalizedRequest);
     const patch = validateWebSocketPatch(normalizedRequest);
+    if (normalizedRequest.targetJid) {
+      const groups = deps.registeredGroups();
+      const group = requireOwnedGroup(normalizedRequest, groups);
+      authorizeGroupScopedWebSocketUpdate(normalizedRequest, group);
+      const groupConfigPath = getWorkerWebSocketSourcesPath(group.folder);
+      const raw = readJsonFile(groupConfigPath);
+      const root = groupWebsocketRootSchema.parse(raw || {});
+      const subscription = requireWebSocketSubscription(
+        normalizedRequest,
+        root.subscriptions,
+        { groupOwned: true },
+      );
+      const currentSubscription = { ...subscription };
+      const mergedSubscription = applyUnsetPaths(
+        deepMerge(currentSubscription, patch) as Record<string, unknown>,
+        normalizedRequest.unsetPaths,
+      );
+
+      if (mergedSubscription.agentConfig !== undefined) {
+        mergedSubscription.agentConfig = validateAgentConfig(
+          mergedSubscription.agentConfig,
+        );
+      }
+
+      validateGroupOwnedWebSocketSubscription(mergedSubscription);
+
+      const nextRoot = {
+        ...root,
+        subscriptions: root.subscriptions.map((entry) => {
+          if (
+            !isPlainObject(entry) ||
+            entry.id !== normalizedRequest.subscriptionId
+          ) {
+            return entry;
+          }
+          return mergedSubscription;
+        }),
+      };
+
+      return {
+        target: `websocket/subscription:${normalizedRequest.subscriptionId}@${normalizedRequest.targetJid}`,
+        before: currentSubscription,
+        after: mergedSubscription,
+        reloadWebSockets: true,
+        apply: async () => {
+          writeJsonFile(groupConfigPath, nextRoot);
+          if (deps.reloadWebSocketSources) {
+            await deps.reloadWebSocketSources();
+          }
+        },
+      };
+    }
+
+    authorizeGlobal(normalizedRequest);
     const raw = readJsonFile(WEBSOCKET_SOURCES_PATH);
     if (!raw) {
       throw new Error('WebSocket source config file does not exist');
     }
     const root = websocketRawRootSchema.parse(raw);
-    const subscription = requireWebSocketSubscription(normalizedRequest, root);
+    const subscription = requireWebSocketSubscription(
+      normalizedRequest,
+      root.subscriptions,
+    );
     const currentSubscription = { ...subscription };
     const mergedSubscription = applyUnsetPaths(
       deepMerge(currentSubscription, patch) as Record<string, unknown>,
       normalizedRequest.unsetPaths,
     );
+    const validatedSubscription =
+      websocketSubscriptionSchema.safeParse(mergedSubscription);
+    if (!validatedSubscription.success) {
+      throw new Error(
+        validatedSubscription.error.issues
+          .map((issue) => issue.message)
+          .join('; '),
+      );
+    }
 
     if (mergedSubscription.agentConfig !== undefined) {
       mergedSubscription.agentConfig = validateAgentConfig(

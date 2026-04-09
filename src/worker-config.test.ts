@@ -104,4 +104,38 @@ describe('worker-owned config', () => {
     expect(onChange).toHaveBeenCalledTimes(1);
     stop();
   });
+
+  it('reloads when a new group appears with existing worker-owned config', async () => {
+    vi.useFakeTimers();
+    fs.mkdirSync(`${testGroupsDir}/later-group/config`, { recursive: true });
+    fs.writeFileSync(
+      `${testGroupsDir}/later-group/config/worker-config.json`,
+      JSON.stringify({ agent: { defaults: { model: 'gpt-5.4-mini' } } }),
+    );
+    const onChange = vi.fn(async () => {});
+    let includeNewGroup = false;
+
+    const stop = startWorkerConfigWatcher({
+      registeredGroups: () =>
+        includeNewGroup
+          ? {
+              'slack:later': {
+                name: 'Later',
+                folder: 'later-group',
+                trigger: '@Andy',
+                added_at: '2026-01-01T00:00:00.000Z',
+              },
+            }
+          : {},
+      onChange,
+      pollMs: 1000,
+    });
+
+    await vi.advanceTimersByTimeAsync(1000);
+    includeNewGroup = true;
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    stop();
+  });
 });

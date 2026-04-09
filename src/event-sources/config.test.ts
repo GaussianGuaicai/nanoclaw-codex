@@ -420,4 +420,66 @@ describe('loadWebSocketSourcesConfig', () => {
 
     expect(loaded.subscriptions).toHaveLength(0);
   });
+
+  it('lets group-owned subscriptions override legacy host subscriptions with the same id', () => {
+    fs.mkdirSync(`${testGroupsDir}/slack_main/config`, { recursive: true });
+    fs.writeFileSync(
+      `${testGroupsDir}/slack_main/config/websocket-sources.json`,
+      JSON.stringify({
+        subscriptions: [
+          {
+            id: 'front-door',
+            connection: 'ha_main',
+            eventType: 'state_changed',
+            promptTemplate: 'Group-owned handler',
+            deliverOutput: true,
+          },
+        ],
+      }),
+    );
+    fs.writeFileSync(
+      testConfigPath,
+      JSON.stringify({
+        connections: {
+          ha_main: {
+            provider: 'home_assistant',
+            urlEnvVar: 'TEST_HA_URL',
+            tokenEnvVar: 'TEST_HA_TOKEN',
+          },
+        },
+        subscriptions: [
+          {
+            id: 'front-door',
+            connection: 'ha_main',
+            kind: 'events',
+            eventType: 'state_changed',
+            targetJid: 'slack:legacy',
+            promptTemplate: 'Legacy handler',
+          },
+        ],
+      }),
+    );
+
+    readEnvFileMock.mockReturnValue({
+      TEST_HA_URL: 'http://127.0.0.1:8123',
+      TEST_HA_TOKEN: 'secret-token',
+    });
+
+    const loaded = loadWebSocketSourcesConfig({
+      'slack:C123': {
+        name: 'Main',
+        folder: 'slack_main',
+        trigger: '@Andy',
+        added_at: '2026-01-01T00:00:00.000Z',
+      },
+    });
+
+    expect(loaded.subscriptions).toHaveLength(1);
+    expect(loaded.subscriptions[0]).toMatchObject({
+      id: 'front-door',
+      targetJid: 'slack:C123',
+      promptTemplate: 'Group-owned handler',
+      deliverOutput: true,
+    });
+  });
 });

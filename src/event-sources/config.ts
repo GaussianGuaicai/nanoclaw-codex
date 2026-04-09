@@ -139,6 +139,10 @@ export interface LoadedWebSocketSourcesConfig {
   subscriptions: WebSocketSubscriptionConfig[];
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function resolveUserPath(inputPath: string): string {
   if (inputPath.startsWith('~/')) {
     return path.join(process.env.HOME || os.homedir(), inputPath.slice(2));
@@ -175,6 +179,39 @@ function loadGroupWebSocketSubscriptions(
   }
 
   return subscriptions;
+}
+
+function mergeWebSocketSubscriptions(
+  hostSubscriptions: unknown[],
+  groupSubscriptions: WebSocketSubscriptionConfig[],
+): unknown[] {
+  const merged = new Map<string, unknown>();
+  const orderedIds: string[] = [];
+
+  for (const subscription of hostSubscriptions) {
+    const id =
+      isPlainObject(subscription) && typeof subscription['id'] === 'string'
+        ? subscription['id']
+        : undefined;
+    if (!id) {
+      orderedIds.push(`host:${orderedIds.length}`);
+      merged.set(orderedIds[orderedIds.length - 1], subscription);
+      continue;
+    }
+    orderedIds.push(id);
+    merged.set(id, subscription);
+  }
+
+  for (const subscription of groupSubscriptions) {
+    if (!orderedIds.includes(subscription.id)) {
+      orderedIds.push(subscription.id);
+    }
+    merged.set(subscription.id, subscription);
+  }
+
+  return orderedIds
+    .map((id) => merged.get(id))
+    .filter((value) => value !== undefined);
 }
 
 export function loadWebSocketSourcesConfig(
@@ -230,10 +267,10 @@ export function loadWebSocketSourcesConfig(
     parsedConnections[name] = parsedConnection.data;
   }
 
-  const rawSubscriptions = [
-    ...root.data.subscriptions,
-    ...loadGroupWebSocketSubscriptions(registeredGroups),
-  ];
+  const rawSubscriptions = mergeWebSocketSubscriptions(
+    root.data.subscriptions,
+    loadGroupWebSocketSubscriptions(registeredGroups),
+  );
   const parsedSubscriptions: WebSocketSourcesConfig['subscriptions'] = [];
   for (const value of rawSubscriptions) {
     const parsedSubscription = subscriptionSchema.safeParse(value);

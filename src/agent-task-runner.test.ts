@@ -71,6 +71,9 @@ vi.mock('./db.js', () => ({
 vi.mock('./agent-config.js', () => ({
   resolveAgentExecutionConfig: resolveAgentExecutionConfigMock,
 }));
+vi.mock('./worker-config.js', () => ({
+  loadWorkerAgentConfig: vi.fn(() => undefined),
+}));
 vi.mock('./context-runtime.js', () => contextRuntimeMock);
 
 import { runSingleTurnAgentTask } from './agent-task-runner.js';

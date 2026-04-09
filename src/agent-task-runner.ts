@@ -16,6 +16,7 @@ import {
   recordCompletedContextTurn,
 } from './context-runtime.js';
 import { GroupQueue } from './group-queue.js';
+import { loadWorkerAgentConfig } from './worker-config.js';
 import {
   AgentExecutionConfig,
   AgentTaskSource,
@@ -97,6 +98,7 @@ export async function runSingleTurnAgentTask(
   const resolvedAgentConfig = resolveAgentExecutionConfig({
     source: request.source,
     group,
+    workerConfig: loadWorkerAgentConfig(group.folder),
     taskOverride: request.agentConfigOverride,
   });
   if (!resolvedAgentConfig.ok) {
@@ -113,6 +115,7 @@ export async function runSingleTurnAgentTask(
   const contextParticipation = isContextSourceEnabled({
     source: request.source,
     contextMode: request.contextMode,
+    groupFolder: group.folder,
   });
   const sessionKey = buildLiveSessionKey({
     groupFolder: group.folder,

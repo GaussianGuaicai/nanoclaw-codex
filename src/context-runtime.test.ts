@@ -9,6 +9,10 @@ vi.mock('./context-config.js', () => ({
   loadContextConfig: loadContextConfigMock,
 }));
 
+vi.mock('./worker-config.js', () => ({
+  mergeWorkerContextConfig: (base: unknown) => base,
+}));
+
 vi.mock('./summary-memory.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./summary-memory.js')>();
   return {

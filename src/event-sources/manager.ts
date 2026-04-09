@@ -38,8 +38,8 @@ export class WebSocketSourceManager {
   }
 
   async start(): Promise<void> {
-    const config = loadWebSocketSourcesConfig();
     const registeredGroups = this.getRegisteredGroups();
+    const config = loadWebSocketSourcesConfig(registeredGroups);
     const subscriptionsByConnection = new Map<
       string,
       WebSocketSubscriptionConfig[]

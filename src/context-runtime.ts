@@ -32,6 +32,7 @@ import {
 } from './types.js';
 import { ContainerOutput } from './container-runner.js';
 import { readSharedInstructionTextsForGroup } from './shared-instructions.js';
+import { mergeWorkerContextConfig } from './worker-config.js';
 
 export interface ContextParticipation {
   enabled: boolean;
@@ -41,8 +42,12 @@ export interface ContextParticipation {
 export function isContextSourceEnabled(params: {
   source: AgentTaskSource;
   contextMode?: EventExecutionContextMode;
+  groupFolder?: string;
 }): ContextParticipation {
-  const config = loadContextConfig();
+  const config = mergeWorkerContextConfig(
+    loadContextConfig(),
+    params.groupFolder,
+  );
   if (!config.enabled) {
     return { enabled: false, config };
   }
@@ -87,7 +92,9 @@ export function getPromptWithBootstrapDetails(params: {
   };
 } {
   const memoryState = getOrCreateGroupMemoryState(params.groupFolder);
-  const config = params.config ?? loadContextConfig();
+  const config =
+    params.config ??
+    mergeWorkerContextConfig(loadContextConfig(), params.groupFolder);
   const historyScope =
     params.source === 'chat' ? ('shared' as const) : ('source-only' as const);
 
@@ -330,6 +337,7 @@ export async function recordCompletedContextTurn(params: {
   const participation = isContextSourceEnabled({
     source: params.source,
     contextMode: params.contextMode,
+    groupFolder: params.group.folder,
   });
   if (!participation.enabled) return;
 

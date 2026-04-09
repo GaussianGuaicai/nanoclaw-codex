@@ -2,15 +2,50 @@
 
 NanoClaw can now consume host-side WebSocket event sources and turn them into immediate agent tasks.
 
-## Config file
+## Config files
 
-Create the host-only config file at:
+Keep provider connections in the host-only config file:
 
 ```text
 ~/.config/nanoclaw/websocket-sources.json
 ```
 
-Use `config-examples/websocket-sources.home-assistant.json` as a Home Assistant-oriented starting point.
+Put group-owned subscriptions in the target group's editable config file:
+
+```text
+groups/<group>/config/websocket-sources.json
+```
+
+The host file may still contain legacy `subscriptions`, but the preferred flow is:
+
+```json
+{
+  "connections": {
+    "ha_main": {
+      "provider": "home_assistant",
+      "urlEnvVar": "HOME_ASSISTANT_URL",
+      "tokenEnvVar": "HOME_ASSISTANT_TOKEN"
+    }
+  }
+}
+```
+
+```json
+{
+  "subscriptions": [
+    {
+      "id": "ha-state-changed-main",
+      "connection": "ha_main",
+      "eventType": "state_changed",
+      "promptTemplate": "Handle {{event_type}}",
+      "contextMode": "group",
+      "deliverOutput": true
+    }
+  ]
+}
+```
+
+Group-owned subscriptions must not include `targetJid` or `taskInstructionsPath`; NanoClaw injects `targetJid` from the group folder's registration, and group-owned instructions should use inline `taskInstructions`. Use `config-examples/websocket-sources.home-assistant.json` as a Home Assistant-oriented starting point for connection and subscription fields.
 
 ## Supported v1 behavior
 
@@ -18,7 +53,7 @@ Use `config-examples/websocket-sources.home-assistant.json` as a Home Assistant-
 - First implemented provider: Home Assistant.
 - Providers register themselves through the event-source registry; the manager no longer imports provider classes directly.
 - Subscription mode: `subscribe_events` only.
-- Events trigger immediate tasks targeting an existing registered `targetJid`.
+- Events trigger immediate tasks targeting the group that owns the subscription file.
 - Default behavior is silent execution with `contextMode: "isolated"`.
 - Events that pass filtering are appended as JSONL to provider-specific files such as `logs/websocket-events-home_assistant.log`.
 - `filtered` and `cooldown` events are not logged unless explicitly enabled in the subscription.
@@ -55,8 +90,8 @@ Use `config-examples/websocket-sources.home-assistant.json` as a Home Assistant-
 - `runTask`: optional boolean; defaults to `true`. Set to `false` for log-only subscriptions.
 - `logTaskResult`: optional boolean; defaults to `false`. When enabled, task result text is written into the corresponding `worker-*.log` file.
 - `taskInstructions`: optional inline execution instructions prepended to the generated task prompt
-- `taskInstructionsPath`: optional host file path whose contents are appended to `taskInstructions`; useful for longer user preference notes
-- `targetJid`: registered group/chat JID that owns the task context
+- `taskInstructionsPath`: optional host file path whose contents are appended to `taskInstructions`; supported only for legacy host-level subscriptions
+- `targetJid`: registered group/chat JID that owns the task context; required only for legacy host-level subscriptions and disallowed in group-owned files
 - `promptTemplate`: required task prompt template
 - `contextMode`: `"isolated"` or `"group"`
 - `deliverOutput`: whether the task result should be sent back to the target chat; when enabled NanoClaw also adds a generic user-visible reply contract to the task prompt

@@ -2,9 +2,10 @@ import fs from 'fs';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { readEnvFileMock, testConfigPath } = vi.hoisted(() => ({
+const { readEnvFileMock, testConfigPath, testGroupsDir } = vi.hoisted(() => ({
   readEnvFileMock: vi.fn(),
   testConfigPath: '/tmp/nanoclaw-websocket-sources.test.json',
+  testGroupsDir: '/tmp/nanoclaw-websocket-groups',
 }));
 
 const testInstructionsPath =
@@ -12,6 +13,9 @@ const testInstructionsPath =
 
 vi.mock('../config.js', () => ({
   WEBSOCKET_SOURCES_PATH: testConfigPath,
+  AGENT_CONFIG_PATH: '/tmp/nanoclaw-websocket-agent-config.test.json',
+  GROUPS_DIR: testGroupsDir,
+  DATA_DIR: '/tmp/nanoclaw-websocket-data',
 }));
 
 vi.mock('../env.js', () => ({
@@ -44,6 +48,7 @@ describe('loadWebSocketSourcesConfig', () => {
     } catch {
       // ignore missing file
     }
+    fs.rmSync(testGroupsDir, { recursive: true, force: true });
   });
 
   afterEach(() => {
@@ -57,6 +62,7 @@ describe('loadWebSocketSourcesConfig', () => {
     } catch {
       // ignore missing file
     }
+    fs.rmSync(testGroupsDir, { recursive: true, force: true });
     delete process.env.TEST_HA_URL;
     delete process.env.TEST_HA_TOKEN;
   });
@@ -260,5 +266,158 @@ describe('loadWebSocketSourcesConfig', () => {
     const loaded = loadWebSocketSourcesConfig();
     expect(loaded.subscriptions).toHaveLength(1);
     expect(loaded.subscriptions[0].id).toBe('valid-subscription');
+  });
+
+  it('loads websocket subscriptions from the owning group directory', () => {
+    fs.mkdirSync(`${testGroupsDir}/slack_main/config`, { recursive: true });
+    fs.writeFileSync(
+      `${testGroupsDir}/slack_main/config/websocket-sources.json`,
+      JSON.stringify({
+        subscriptions: [
+          {
+            id: 'front-door',
+            connection: 'ha_main',
+            eventType: 'state_changed',
+            filters: [
+              {
+                path: 'data.entity_id',
+                op: 'starts_with',
+                value: 'device_tracker.',
+              },
+            ],
+            promptTemplate: 'Handle {{event_type}}',
+            contextMode: 'group',
+            deliverOutput: true,
+          },
+        ],
+      }),
+    );
+    fs.writeFileSync(
+      testConfigPath,
+      JSON.stringify({
+        connections: {
+          ha_main: {
+            provider: 'home_assistant',
+            urlEnvVar: 'TEST_HA_URL',
+            tokenEnvVar: 'TEST_HA_TOKEN',
+          },
+        },
+      }),
+    );
+
+    readEnvFileMock.mockReturnValue({
+      TEST_HA_URL: 'http://127.0.0.1:8123',
+      TEST_HA_TOKEN: 'secret-token',
+    });
+
+    const loaded = loadWebSocketSourcesConfig({
+      'slack:C123': {
+        name: 'Main',
+        folder: 'slack_main',
+        trigger: '@Andy',
+        added_at: '2026-01-01T00:00:00.000Z',
+      },
+    });
+
+    expect(loaded.subscriptions).toHaveLength(1);
+    expect(loaded.subscriptions[0]).toMatchObject({
+      id: 'front-door',
+      kind: 'events',
+      targetJid: 'slack:C123',
+      contextMode: 'group',
+      deliverOutput: true,
+    });
+  });
+
+  it('rejects group websocket subscriptions that try to set targetJid', () => {
+    fs.mkdirSync(`${testGroupsDir}/slack_main/config`, { recursive: true });
+    fs.writeFileSync(
+      `${testGroupsDir}/slack_main/config/websocket-sources.json`,
+      JSON.stringify({
+        subscriptions: [
+          {
+            id: 'front-door',
+            connection: 'ha_main',
+            eventType: 'state_changed',
+            targetJid: 'slack:other',
+            promptTemplate: 'Handle {{event_type}}',
+          },
+        ],
+      }),
+    );
+    fs.writeFileSync(
+      testConfigPath,
+      JSON.stringify({
+        connections: {
+          ha_main: {
+            provider: 'home_assistant',
+            urlEnvVar: 'TEST_HA_URL',
+            tokenEnvVar: 'TEST_HA_TOKEN',
+          },
+        },
+      }),
+    );
+
+    readEnvFileMock.mockReturnValue({
+      TEST_HA_URL: 'http://127.0.0.1:8123',
+      TEST_HA_TOKEN: 'secret-token',
+    });
+
+    const loaded = loadWebSocketSourcesConfig({
+      'slack:C123': {
+        name: 'Main',
+        folder: 'slack_main',
+        trigger: '@Andy',
+        added_at: '2026-01-01T00:00:00.000Z',
+      },
+    });
+
+    expect(loaded.subscriptions).toHaveLength(0);
+  });
+
+  it('rejects group websocket subscriptions that try to read host instruction paths', () => {
+    fs.mkdirSync(`${testGroupsDir}/slack_main/config`, { recursive: true });
+    fs.writeFileSync(
+      `${testGroupsDir}/slack_main/config/websocket-sources.json`,
+      JSON.stringify({
+        subscriptions: [
+          {
+            id: 'front-door',
+            connection: 'ha_main',
+            eventType: 'state_changed',
+            taskInstructionsPath: '~/.config/nanoclaw/secret-notes.md',
+            promptTemplate: 'Handle {{event_type}}',
+          },
+        ],
+      }),
+    );
+    fs.writeFileSync(
+      testConfigPath,
+      JSON.stringify({
+        connections: {
+          ha_main: {
+            provider: 'home_assistant',
+            urlEnvVar: 'TEST_HA_URL',
+            tokenEnvVar: 'TEST_HA_TOKEN',
+          },
+        },
+      }),
+    );
+
+    readEnvFileMock.mockReturnValue({
+      TEST_HA_URL: 'http://127.0.0.1:8123',
+      TEST_HA_TOKEN: 'secret-token',
+    });
+
+    const loaded = loadWebSocketSourcesConfig({
+      'slack:C123': {
+        name: 'Main',
+        folder: 'slack_main',
+        trigger: '@Andy',
+        added_at: '2026-01-01T00:00:00.000Z',
+      },
+    });
+
+    expect(loaded.subscriptions).toHaveLength(0);
   });
 });

@@ -121,6 +121,15 @@ describe('agent-config resolver', () => {
       websocketOverride: {
         reasoningEffort: 'high',
       },
+      workerConfig: {
+        bySource: {
+          websocket: {
+            codexConfigOverrides: {
+              worker_flag: true,
+            },
+          },
+        },
+      },
       taskOverride: {
         model: 'task-model',
         codexConfigOverrides: {
@@ -137,6 +146,7 @@ describe('agent-config resolver', () => {
         codexConfigOverrides: {
           global_flag: true,
           group_flag: true,
+          worker_flag: true,
           task_flag: true,
         },
       },

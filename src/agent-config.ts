@@ -240,6 +240,7 @@ export interface ResolveAgentExecutionConfigOptions {
   group?: RegisteredGroup;
   taskOverride?: unknown;
   websocketOverride?: unknown;
+  workerConfig?: unknown;
 }
 
 export interface ResolveAgentExecutionConfigResult {
@@ -285,6 +286,13 @@ export function resolveAgentExecutionConfig(
   );
   if (!websocketOverride.ok) return websocketOverride;
 
+  const workerConfig = parseScoped(
+    agentExecutionSourceConfigSchema,
+    options.workerConfig,
+    'group',
+  );
+  if (!workerConfig.ok) return workerConfig;
+
   const taskOverride = parseScoped(
     agentExecutionConfigSchema,
     options.taskOverride,
@@ -300,6 +308,7 @@ export function resolveAgentExecutionConfig(
     sourceDefaults[options.source],
   );
   resolved = applySourceLayer(resolved, options.source, groupLayer.value);
+  resolved = applySourceLayer(resolved, options.source, workerConfig.value);
   resolved = mergeAgentExecutionConfig(resolved, websocketOverride.value);
   resolved = mergeAgentExecutionConfig(resolved, taskOverride.value);
 

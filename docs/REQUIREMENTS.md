@@ -24,7 +24,7 @@ Instead of application-level permission systems trying to prevent agents from ac
 
 ### Built for One User
 
-This isn't a framework or a platform. It's working software for my specific needs. I use WhatsApp and Email, so it supports WhatsApp and Email. I don't use Telegram, so it doesn't support Telegram. I add the integrations I actually want, not every possible integration.
+This isn't a framework or a platform. It's working software for one user's needs. Messaging channels and integrations are installed as skills, so a fork can carry only the channels it actually uses.
 
 ### Customization = Code Changes
 
@@ -87,14 +87,14 @@ A personal Codex-powered assistant accessible through messaging channels, with m
 ## Architecture Decisions
 
 ### Message Routing
-- A router listens to WhatsApp and routes messages based on configuration
+- Connected channels store messages in SQLite, and the host routes messages based on registered chat configuration
 - Only messages from registered groups are processed
 - Trigger: `@Andy` prefix (case insensitive), configurable via `ASSISTANT_NAME` env var
 - Unregistered groups are ignored completely
 
 ### Memory System
 - **Per-group memory**: Each group has a folder with its own `AGENTS.md`
-- **Shared instruction layers**: Groups can also inherit `preferences.md`, `CLAUDE.md`, repo-root `AGENTS.md` for the main group, and `groups/global/AGENTS.md`
+- **Shared instruction layers**: Groups can also inherit `AGENTS.md`, `CLAUDE.md`, or `preferences.md` from their group folder, `groups/global/`, approved extra roots, and the repo root for the main group
 - **Files**: Groups can create/read files in their folder and reference them
 - Agent runs in the group's folder and reads the relevant shared instruction files separately from the structured summary
 
@@ -130,7 +130,7 @@ A personal Codex-powered assistant accessible through messaging channels, with m
 
 ### Main Channel Privileges
 - Main channel is the admin/control group (typically self-chat)
-- Can write to global memory (`groups/AGENTS.md`)
+- Can update shared instruction files when those files are in its writable group folder or an explicitly approved writable root; `groups/global/` is otherwise exposed as a snapshot
 - Can schedule tasks for any group
 - Can view and manage tasks from all groups
 - Can configure additional directory mounts for any group
@@ -139,10 +139,10 @@ A personal Codex-powered assistant accessible through messaging channels, with m
 
 ## Integration Points
 
-### WhatsApp
-- Using baileys library for WhatsApp Web connection
-- Messages stored in SQLite, polled by router
-- QR code authentication during setup
+### Channels
+- Channels self-register through `src/channels/registry.ts`
+- Installed channels store messages in SQLite, and the router polls them uniformly
+- WhatsApp, Telegram, Slack, Discord, and Gmail are provided as installable skills
 
 ### Scheduler
 - Built-in scheduler runs on the host and spawns isolated worker runs for task execution
@@ -189,7 +189,7 @@ A personal Codex-powered assistant accessible through messaging channels, with m
 These are the creator's settings, stored here for reference:
 
 - **Trigger**: `@Andy` (case insensitive)
-- **Response prefix**: `Andy:`
+- **Response prefix**: none added by the router; outbound text is sent as returned after stripping `<internal>...</internal>` blocks
 - **Persona**: Default Codex (no custom personality)
 - **Main channel**: Self-chat (messaging yourself in WhatsApp)
 

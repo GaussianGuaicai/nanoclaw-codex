@@ -85,7 +85,7 @@ SLACK_ONLY=true
 Then sync the environment to the container:
 
 ```bash
-mkdir -p data/env && cp .env data/env/env
+npm run build
 ```
 
 ## Step 7: Add the Bot to Channels
@@ -146,4 +146,4 @@ The NanoClaw JID format is `slack:` followed by the channel ID, e.g., `slack:C01
 **Token not working:**
 - Bot tokens start with `xoxb-` — if yours doesn't, you may have copied the wrong token
 - App tokens start with `xapp-` — these are generated in the Socket Mode or Basic Information pages
-- If you regenerated a token, update `.env` and re-sync: `cp .env data/env/env`
+- If you regenerated a token, update `.env`, rebuild if needed, and restart the service.

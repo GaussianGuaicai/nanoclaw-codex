@@ -65,7 +65,7 @@ codex
 - **网络访问** - 搜索和抓取网页内容
 - **本地 Codex 沙箱** - 智能体通过本地 worker 在 `workspace-write` 沙箱中运行，可见范围由宿主准备
 - **结构化会话记忆** - 可选的 `~/.config/nanoclaw/context-config.json` 能记录 turns、维护 YAML 摘要、注入 `CONTEXT_BUNDLE` / `MEMORY_REFRESH`，并在上下文过长时压缩
-- **智能体集群（Agent Swarms）** - 启动多个专业智能体团队，协作完成复杂任务（首个支持此功能的个人 AI 助手）
+- **智能体集群（Agent Swarms）** - 可通过 Telegram swarm 技能扩展，让多个专业智能体协作完成复杂任务
 - **可选集成** - 通过技能添加 Gmail (`$add-gmail`) 等更多功能
 
 ## 使用方法

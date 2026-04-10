@@ -10,9 +10,7 @@ Read `.nanoclaw/state.yaml`. If `discord` is in `applied_skills`, skip to Phase 
 
 ### Ask the user
 
-Use `AskUserQuestion` to collect configuration:
-
-AskUserQuestion: Do you have a Discord bot token, or do you need to create one?
+Ask whether the user already has a Discord bot token or needs to create one.
 
 If they have one, collect it now. If not, we'll create one in Phase 3.
 
@@ -86,14 +84,7 @@ DISCORD_BOT_TOKEN=<their-token>
 ```
 
 Channels auto-enable when their credentials are present — no extra configuration needed.
-
-Sync to container environment:
-
-```bash
-mkdir -p data/env && cp .env data/env/env
-```
-
-The container reads environment from `data/env/env`, not `.env` directly.
+The current local-worker runtime reads `.env` through the host; there is no `data/env/env` sync step.
 
 ### Build and restart
 
@@ -169,7 +160,7 @@ tail -f logs/nanoclaw.log
 
 ### Bot not responding
 
-1. Check `DISCORD_BOT_TOKEN` is set in `.env` AND synced to `data/env/env`
+1. Check `DISCORD_BOT_TOKEN` is set in `.env`
 2. Check channel is registered: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE 'dc:%'"`
 3. For non-main channels: message must include trigger pattern (@mention the bot)
 4. Service is running: `launchctl list | grep nanoclaw`

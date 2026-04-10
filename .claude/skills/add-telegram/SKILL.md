@@ -15,9 +15,7 @@ Read `.nanoclaw/state.yaml`. If `telegram` is in `applied_skills`, skip to Phase
 
 ### Ask the user
 
-Use `AskUserQuestion` to collect configuration:
-
-AskUserQuestion: Do you have a Telegram bot token, or do you need to create one?
+Ask whether the user already has a Telegram bot token or needs to create one.
 
 If they have one, collect it now. If not, we'll create one in Phase 3.
 
@@ -86,14 +84,7 @@ TELEGRAM_BOT_TOKEN=<their-token>
 ```
 
 Channels auto-enable when their credentials are present — no extra configuration needed.
-
-Sync to container environment:
-
-```bash
-mkdir -p data/env && cp .env data/env/env
-```
-
-The container reads environment from `data/env/env`, not `.env` directly.
+The current local-worker runtime reads `.env` through the host; there is no `data/env/env` sync step.
 
 ### Disable Group Privacy (for group chats)
 
@@ -179,7 +170,7 @@ tail -f logs/nanoclaw.log
 ### Bot not responding
 
 Check:
-1. `TELEGRAM_BOT_TOKEN` is set in `.env` AND synced to `data/env/env`
+1. `TELEGRAM_BOT_TOKEN` is set in `.env`
 2. Chat is registered in SQLite (check with: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE 'tg:%'"`)
 3. For non-main chats: message includes trigger pattern
 4. Service is running: `launchctl list | grep nanoclaw` (macOS) or `systemctl --user status nanoclaw` (Linux)
@@ -213,11 +204,9 @@ launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
 
 ## Agent Swarms (Teams)
 
-After completing the Telegram setup, use `AskUserQuestion`:
+After completing Telegram setup, ask whether to add Agent Swarm support. Without it, agent teams still operate behind the scenes. With Swarm support, each subagent can appear as a different bot in the Telegram group.
 
-AskUserQuestion: Would you like to add Agent Swarm support? Without it, Agent Teams still work — they just operate behind the scenes. With Swarm support, each subagent appears as a different bot in the Telegram group so you can see who's saying what and have interactive team sessions.
-
-If they say yes, invoke the `/add-telegram-swarm` skill.
+If they say yes, invoke `$add-telegram-swarm`.
 
 ## Removal
 

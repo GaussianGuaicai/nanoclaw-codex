@@ -11,8 +11,11 @@ import {
   getMessagesSince,
   getNewMessages,
   getTaskById,
+  getAllSessions,
   insertContextTurn,
+  migrateLegacyLiveSessions,
   setRegisteredGroup,
+  setSession,
   storeChatMetadata,
   storeMessage,
   updateGroupMemoryState,
@@ -428,6 +431,33 @@ describe('task CRUD', () => {
     expect(getTaskById('task-2')!.status).toBe('paused');
   });
 
+  it('updates task agent config', () => {
+    createTask({
+      id: 'task-2-agent',
+      group_folder: 'main',
+      chat_jid: 'group@g.us',
+      prompt: 'test',
+      schedule_type: 'once',
+      schedule_value: '2024-06-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: null,
+      status: 'active',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    updateTask('task-2-agent', {
+      agent_config: {
+        model: 'gpt-5.4-mini',
+        reasoningEffort: 'high',
+      },
+    });
+
+    expect(getTaskById('task-2-agent')!.agent_config).toEqual({
+      model: 'gpt-5.4-mini',
+      reasoningEffort: 'high',
+    });
+  });
+
   it('deletes a task and its run logs', () => {
     createTask({
       id: 'task-3',
@@ -478,5 +508,30 @@ describe('registered group isMain', () => {
     const group = groups['group@g.us'];
     expect(group).toBeDefined();
     expect(group.isMain).toBeUndefined();
+  });
+});
+
+describe('live session migration', () => {
+  it('migrates legacy bare session keys to chat-scoped keys', () => {
+    setSession('slack_main', 'legacy-session');
+
+    const result = migrateLegacyLiveSessions();
+    const sessions = getAllSessions();
+
+    expect(result).toEqual({ migrated: 1, dropped: 0 });
+    expect(sessions['slack_main']).toBeUndefined();
+    expect(sessions['slack_main::chat']).toBe('legacy-session');
+  });
+
+  it('drops legacy bare session keys when a chat-scoped key already exists', () => {
+    setSession('slack_main', 'legacy-session');
+    setSession('slack_main::chat', 'scoped-session');
+
+    const result = migrateLegacyLiveSessions();
+    const sessions = getAllSessions();
+
+    expect(result).toEqual({ migrated: 0, dropped: 1 });
+    expect(sessions['slack_main']).toBeUndefined();
+    expect(sessions['slack_main::chat']).toBe('scoped-session');
   });
 });

@@ -71,6 +71,34 @@ HOME_ASSISTANT_URL=https://your-home-assistant.example
 HASS_ACCESS_TOKEN=your-home-assistant-token
 ```
 
+Optional group-only worker env overrides live in a host-only config file:
+
+```text
+~/.config/nanoclaw/group-secrets.json
+```
+
+Example:
+
+```json
+{
+  "version": 1,
+  "groups": {
+    "example_group": {
+      "env": {
+        "HOME_ASSISTANT_URL": "https://ha.example",
+        "HASS_ACCESS_TOKEN": "..."
+      }
+    }
+  }
+}
+```
+
+These values are exposed only to worker sessions for the matching `group.folder`.
+For keys declared in that group's `env` map, worker resolution is:
+`group-secrets.json > project .env`.
+Host-side event sources and channel/service startup still use the global process
+environment and project `.env`.
+
 Optional structured model config (higher priority than legacy env):
 
 ```text
@@ -98,7 +126,7 @@ Precedence:
 
 Per-group Codex state lives under `data/sessions/{group}/.codex`. That directory is used as `CODEX_HOME`, so each group gets isolated session history, auth state, logs, and local Codex metadata.
 
-Structured session memory is configured separately through `~/.config/nanoclaw/context-config.json`. It is off by default, and when enabled it records per-group turns, maintains a YAML summary, and can compact old context. See [docs/CONTEXT_MEMORY.md](docs/CONTEXT_MEMORY.md) and the `/context-memory` skill.
+Structured session memory is configured separately through `~/.config/nanoclaw/context-config.json`. It is off by default, and when enabled it records per-group turns, maintains a YAML summary, injects a `CONTEXT_BUNDLE` on fresh sessions, injects a lighter `MEMORY_REFRESH` on resumed sessions, and can compact old context with budgeted recent-turn selection. See [docs/CONTEXT_MEMORY.md](docs/CONTEXT_MEMORY.md) and the `$context-memory` skill.
 
 ## Remote MCP and Event Sources
 
@@ -137,14 +165,14 @@ The runtime defaults to `workspace-write` sandbox mode with `approval_policy=nev
 
 - Group-isolated memory via `groups/*/AGENTS.md`
 - Per-group Codex session state via `data/sessions/*/.codex`
-- Structured session memory and sliding-window compaction via `~/.config/nanoclaw/context-config.json`
+- Structured session memory with `CONTEXT_BUNDLE`, `MEMORY_REFRESH`, and sliding-window compaction via `~/.config/nanoclaw/context-config.json`
 - Scheduled tasks that run through the same local worker
 - File-based IPC between the host orchestrator and the worker MCP server
 - Per-group remote MCP server attachments
 - Host-side WebSocket event subscriptions with immediate task execution
 - Skill-based channel installation (`$add-whatsapp`, `$add-telegram`, `$add-slack`, `$add-discord`, `$add-gmail`)
 
-The core intentionally does not bundle channel implementations. Channels are added by skills that patch `src/channels/` and self-register at startup.
+The base core is intentionally channel-light. Channels are added by skills that patch `src/channels/` and self-register at startup. Customized checkouts may already include applied channel skills; this checkout currently has Slack applied, which is why `src/channels/slack.ts` is present.
 
 ## Requirements
 
@@ -215,7 +243,7 @@ Key files:
 
 The main security boundary is now Codex sandbox policy plus host-side directory orchestration, not Linux VM/container isolation.
 
-- Main group can edit the repo root.
+- Main group can inspect a sanitized read-only snapshot of the repo root. Repo writes require an explicitly approved writable root or a human-run Codex session in the workspace.
 - Non-main groups are limited to their own group directory plus any host-approved extra roots or snapshots.
 - Extra writable roots are validated against an external allowlist at `~/.config/nanoclaw/mount-allowlist.json`.
 - WebSocket event-source config stays host-side in `~/.config/nanoclaw/websocket-sources.json`.
@@ -225,7 +253,7 @@ See [docs/SECURITY.md](docs/SECURITY.md) for the current model.
 
 ## FAQ
 
-**Do I still need Claude Code if runtime is Codex?**
+**Do I still need the old Claude Code workflow if runtime is Codex?**
 
 No. The recommended host workflow is now Codex: install the Codex CLI, create the `.agents/skills` symlink, open the repo with `codex`, and run repo skills with `$setup`, `$customize`, and the other `$skill-name` commands.
 

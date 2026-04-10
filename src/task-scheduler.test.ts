@@ -1,5 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const { runSingleTurnAgentTaskMock } = vi.hoisted(() => ({
+  runSingleTurnAgentTaskMock: vi.fn(async () => ({
+    result: 'ok',
+    error: null,
+  })),
+}));
+
+vi.mock('./agent-task-runner.js', () => ({
+  runSingleTurnAgentTask: runSingleTurnAgentTaskMock,
+}));
+
 import { _initTestDatabase, createTask, getTaskById } from './db.js';
 import {
   _resetSchedulerLoopForTests,
@@ -11,6 +22,7 @@ describe('task scheduler', () => {
   beforeEach(() => {
     _initTestDatabase();
     _resetSchedulerLoopForTests();
+    runSingleTurnAgentTaskMock.mockClear();
     vi.useFakeTimers();
   });
 
@@ -125,5 +137,53 @@ describe('task scheduler', () => {
     const offset =
       (new Date(nextRun!).getTime() - new Date(scheduledTime).getTime()) % ms;
     expect(offset).toBe(0);
+  });
+
+  it('passes through deliver_output=false for scheduled tasks', async () => {
+    createTask({
+      id: 'task-no-delivery',
+      group_folder: 'test-group',
+      chat_jid: 'test@g.us',
+      prompt: 'test',
+      schedule_type: 'once',
+      schedule_value: '2026-01-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      deliver_output: false,
+      next_run: new Date(Date.now() - 1_000).toISOString(),
+      status: 'active',
+      created_at: '2026-01-01T00:00:00.000Z',
+    });
+
+    const enqueueTask = vi.fn(
+      (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+        void fn();
+      },
+    );
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'test@g.us': {
+          name: 'Test',
+          folder: 'test-group',
+          trigger: '@bot',
+          added_at: '2026-01-01T00:00:00.000Z',
+        },
+      }),
+      getSessions: () => ({}),
+      queue: { enqueueTask } as any,
+      onProcess: () => {},
+      sendMessage: async () => {},
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(runSingleTurnAgentTaskMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        source: 'scheduled',
+        deliverOutput: false,
+      }),
+      expect.anything(),
+    );
   });
 });

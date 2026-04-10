@@ -10,9 +10,11 @@ import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import {
   WebSocketConnectionConfig,
+  RegisteredGroup,
   WebSocketSourcesConfig,
   WebSocketSubscriptionConfig,
 } from '../types.js';
+import { getWorkerWebSocketSourcesPath } from '../worker-config.js';
 
 const matchValueSchema = z.union([
   z.string(),
@@ -113,6 +115,19 @@ const subscriptionSchema = z.object({
   agentConfig: agentExecutionConfigSchema.optional(),
 });
 
+const groupSubscriptionSchema = subscriptionSchema
+  .omit({ targetJid: true, taskInstructionsPath: true })
+  .extend({
+    kind: z.literal('events').optional(),
+  })
+  .strict();
+
+const groupWebSocketSourcesSchema = z
+  .object({
+    subscriptions: z.array(groupSubscriptionSchema).default([]),
+  })
+  .strict();
+
 export interface ResolvedWebSocketConnectionConfig extends WebSocketConnectionConfig {
   name: string;
   url: string;
@@ -124,6 +139,10 @@ export interface LoadedWebSocketSourcesConfig {
   subscriptions: WebSocketSubscriptionConfig[];
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function resolveUserPath(inputPath: string): string {
   if (inputPath.startsWith('~/')) {
     return path.join(process.env.HOME || os.homedir(), inputPath.slice(2));
@@ -132,7 +151,72 @@ function resolveUserPath(inputPath: string): string {
   return path.resolve(inputPath);
 }
 
-export function loadWebSocketSourcesConfig(): LoadedWebSocketSourcesConfig {
+function loadGroupWebSocketSubscriptions(
+  registeredGroups: Record<string, RegisteredGroup>,
+): WebSocketSubscriptionConfig[] {
+  const subscriptions: WebSocketSubscriptionConfig[] = [];
+
+  for (const [targetJid, group] of Object.entries(registeredGroups)) {
+    const configPath = getWorkerWebSocketSourcesPath(group.folder);
+    if (!fs.existsSync(configPath)) continue;
+
+    try {
+      const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      const parsed = groupWebSocketSourcesSchema.parse(raw);
+      subscriptions.push(
+        ...parsed.subscriptions.map((subscription) => ({
+          ...subscription,
+          kind: 'events' as const,
+          targetJid,
+        })),
+      );
+    } catch (err) {
+      logger.warn(
+        { group: group.folder, path: configPath, err },
+        'Ignoring invalid group WebSocket source config',
+      );
+    }
+  }
+
+  return subscriptions;
+}
+
+function mergeWebSocketSubscriptions(
+  hostSubscriptions: unknown[],
+  groupSubscriptions: WebSocketSubscriptionConfig[],
+): unknown[] {
+  const merged = new Map<string, unknown>();
+  const orderedIds: string[] = [];
+
+  for (const subscription of hostSubscriptions) {
+    const id =
+      isPlainObject(subscription) && typeof subscription['id'] === 'string'
+        ? subscription['id']
+        : undefined;
+    if (!id) {
+      orderedIds.push(`host:${orderedIds.length}`);
+      merged.set(orderedIds[orderedIds.length - 1], subscription);
+      continue;
+    }
+    orderedIds.push(id);
+    merged.set(id, subscription);
+  }
+
+  for (const subscription of groupSubscriptions) {
+    if (!orderedIds.includes(subscription.id)) {
+      orderedIds.push(subscription.id);
+    }
+    merged.set(subscription.id, subscription);
+  }
+
+  return orderedIds
+    .map((id) => merged.get(id))
+    .filter((value) => value !== undefined);
+}
+
+export function loadWebSocketSourcesConfig(
+  registeredGroups: Record<string, RegisteredGroup> = {},
+): LoadedWebSocketSourcesConfig {
   let raw: unknown = { connections: {}, subscriptions: [] };
 
   if (!fs.existsSync(WEBSOCKET_SOURCES_PATH)) {
@@ -183,8 +267,12 @@ export function loadWebSocketSourcesConfig(): LoadedWebSocketSourcesConfig {
     parsedConnections[name] = parsedConnection.data;
   }
 
+  const rawSubscriptions = mergeWebSocketSubscriptions(
+    root.data.subscriptions,
+    loadGroupWebSocketSubscriptions(registeredGroups),
+  );
   const parsedSubscriptions: WebSocketSourcesConfig['subscriptions'] = [];
-  for (const value of root.data.subscriptions) {
+  for (const value of rawSubscriptions) {
     const parsedSubscription = subscriptionSchema.safeParse(value);
     if (!parsedSubscription.success) {
       logger.error(

@@ -27,20 +27,20 @@ Check whether the environment is headless (no display server):
 
 ### Ask the user
 
-Use `AskUserQuestion` to collect configuration. **Adapt auth options based on environment:**
+Collect configuration with concise direct questions. **Adapt auth options based on environment:**
 
-If IS_HEADLESS=true AND not WSL → AskUserQuestion: How do you want to authenticate WhatsApp?
+If IS_HEADLESS=true AND not WSL, ask how to authenticate WhatsApp:
 - **Pairing code** (Recommended) - Enter a numeric code on your phone (no camera needed, requires phone number)
 - **QR code in terminal** - Displays QR code in the terminal (can be too small on some displays)
 
-Otherwise (macOS, desktop Linux, or WSL) → AskUserQuestion: How do you want to authenticate WhatsApp?
+Otherwise (macOS, desktop Linux, or WSL), ask how to authenticate WhatsApp:
 - **QR code in browser** (Recommended) - Opens a browser window with a large, scannable QR code
 - **Pairing code** - Enter a numeric code on your phone (no camera needed, requires phone number)
 - **QR code in terminal** - Displays QR code in the terminal (can be too small on some displays)
 
 If they chose pairing code:
 
-AskUserQuestion: What is your phone number? (Include country code without +, e.g., 1234567890)
+If they choose pairing code, ask for the phone number with country code and no `+`.
 
 ## Phase 2: Verify Code
 
@@ -141,13 +141,7 @@ test -f store/auth/creds.json && echo "Authentication successful" || echo "Authe
 
 ### Configure environment
 
-Channels auto-enable when their credentials are present — WhatsApp activates when `store/auth/creds.json` exists.
-
-Sync to container environment:
-
-```bash
-mkdir -p data/env && cp .env data/env/env
-```
+Channels auto-enable when their credentials are present. WhatsApp activates when `store/auth/creds.json` exists. The current local-worker runtime reads `.env` directly through the host, so there is no `data/env/env` sync step.
 
 ## Phase 4: Registration
 
@@ -155,21 +149,21 @@ mkdir -p data/env && cp .env data/env/env
 
 Get the bot's WhatsApp number: `node -e "const c=require('./store/auth/creds.json');console.log(c.me.id.split(':')[0].split('@')[0])"`
 
-AskUserQuestion: Is this a shared phone number (personal WhatsApp) or a dedicated number (separate device)?
+Ask whether this is a shared phone number (personal WhatsApp) or a dedicated assistant number.
 - **Shared number** - Your personal WhatsApp number (recommended: use self-chat or a solo group)
 - **Dedicated number** - A separate phone/SIM for the assistant
 
-AskUserQuestion: What trigger word should activate the assistant?
+Ask what trigger word should activate the assistant.
 - **@Andy** - Default trigger
 - **@Claw** - Short and easy
-- **@Claude** - Match the AI name
+- **@Codex** - Match the current runtime
 
-AskUserQuestion: What should the assistant call itself?
+Ask what the assistant should call itself.
 - **Andy** - Default name
 - **Claw** - Short and easy
-- **Claude** - Match the AI name
+- **Codex** - Match the current runtime
 
-AskUserQuestion: Where do you want to chat with the assistant?
+Ask where the user wants to chat with the assistant.
 
 **Shared number options:**
 - **Self-chat** (Recommended) - Chat in your own "Message Yourself" conversation
@@ -198,7 +192,7 @@ npx tsx setup/index.ts --step groups
 npx tsx setup/index.ts --step groups --list
 ```
 
-The output shows `JID|GroupName` pairs. Present candidates as AskUserQuestion (names only, not JIDs).
+The output shows `JID|GroupName` pairs. Present candidates by name and keep the selected JID internally.
 
 ### Register the chat
 
@@ -341,5 +335,4 @@ To remove WhatsApp integration:
 
 1. Delete auth credentials: `rm -rf store/auth/`
 2. Remove WhatsApp registrations: `sqlite3 store/messages.db "DELETE FROM registered_groups WHERE jid LIKE '%@g.us' OR jid LIKE '%@s.whatsapp.net'"`
-3. Sync env: `mkdir -p data/env && cp .env data/env/env`
-4. Rebuild and restart: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)
+3. Rebuild and restart: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)

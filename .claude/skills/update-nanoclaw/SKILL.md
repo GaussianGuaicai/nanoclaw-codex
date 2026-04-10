@@ -7,7 +7,7 @@ description: Efficiently bring upstream NanoClaw updates into a customized insta
 
 Your NanoClaw fork drifts from upstream as you customize it. This skill pulls upstream changes into your install without losing your modifications.
 
-Run `/update-nanoclaw` in Claude Code.
+Run `$update-nanoclaw` in Codex.
 
 ## How it works
 
@@ -18,7 +18,7 @@ Run `/update-nanoclaw` in Claude Code.
 **Preview**: runs `git log` and `git diff` against the merge base to show upstream changes since your last sync. Groups changed files into categories:
 - **Skills** (`.claude/skills/`): unlikely to conflict unless you edited an upstream skill
 - **Source** (`src/`): may conflict if you modified the same files
-- **Build/config** (`package.json`, `tsconfig*.json`, `container/`): review needed
+- **Build/config** (`package.json`, `tsconfig*.json`, `container/agent-runner/`, `launchd/`): review needed
 
 **Update paths** (you pick one):
 - `merge` (default): `git merge upstream/<branch>`. Resolves all conflicts in one pass.
@@ -109,10 +109,10 @@ Show file-level impact from upstream:
 Bucket the upstream changed files:
 - **Skills** (`.claude/skills/`): unlikely to conflict unless the user edited an upstream skill
 - **Source** (`src/`): may conflict if user modified the same files
-- **Build/config** (`package.json`, `package-lock.json`, `tsconfig*.json`, `container/`, `launchd/`): review needed
+- **Build/config** (`package.json`, `package-lock.json`, `tsconfig*.json`, `container/agent-runner/`, `launchd/`): review needed
 - **Other**: docs, tests, misc
 
-Present these buckets to the user and ask them to choose one path using AskUserQuestion:
+Present these buckets to the user and ask them to choose one path:
 - A) **Full update**: merge all upstream changes
 - B) **Selective update**: cherry-pick specific upstream commits
 - C) **Abort**: they only wanted the preview
@@ -190,7 +190,7 @@ Determine which CHANGELOG entries are new by diffing against the backup tag:
 
 Parse the diff output for lines starting with `+[BREAKING]`. Each such line is one breaking change entry. The format is:
 ```
-[BREAKING] <description>. Run `/<skill-name>` to <action>.
+[BREAKING] <description>. Run `$<skill-name>` to <action>.
 ```
 
 If no `[BREAKING]` lines are found:
@@ -199,9 +199,9 @@ If no `[BREAKING]` lines are found:
 If one or more `[BREAKING]` lines are found:
 - Display a warning header to the user: "This update includes breaking changes that may require action:"
 - For each breaking change, display the full description.
-- Collect all skill names referenced in the breaking change entries (the `/<skill-name>` part).
-- Use AskUserQuestion to ask the user which migration skills they want to run now. Options:
-  - One option per referenced skill (e.g., "Run /add-whatsapp to re-add WhatsApp channel")
+- Collect all skill names referenced in the breaking change entries (the `$<skill-name>` part).
+- Ask the user which migration skills they want to run now. Options:
+  - One option per referenced skill (e.g., "Run $add-whatsapp to re-add WhatsApp channel")
   - "Skip — I'll handle these manually"
 - Set `multiSelect: true` so the user can pick multiple skills if there are several breaking changes.
 - For each skill the user selects, invoke it using the Skill tool.

@@ -15,8 +15,13 @@ import {
 } from './config.js';
 import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
+import { resolveGroupWorkerEnv } from './group-secrets.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
+import {
+  dedupeInstructionPaths,
+  findInstructionFiles,
+} from './shared-instructions.js';
 import {
   formatLocalIsoTimestamp,
   formatLocalTimestampForFilename,
@@ -31,6 +36,8 @@ import {
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 const EXTRA_SNAPSHOT_PREFIX = '/workspace/extra/';
+const MAX_WORKER_LOG_TEXT = 30000;
+const TRUNCATED_MARKER = '[TRUNCATED]';
 
 export interface AgentRuntimePaths {
   groupPath: string;
@@ -59,9 +66,17 @@ export interface ContainerInput {
     includePrompt?: boolean;
     includeResult?: boolean;
   };
+  contextDebug?: {
+    bootstrapUsed: boolean;
+    memoryRefreshUsed: boolean;
+    summaryIncluded: boolean;
+    recentTurnsScope: 'shared' | 'source-only' | 'none';
+    recentTurnCount: number;
+  };
   maintenancePurpose?: 'summary-memory';
   suppressConversationArchive?: boolean;
-  secrets?: Record<string, string>;
+  sdkSecrets?: Record<string, string>;
+  workerEnv?: Record<string, string>;
 }
 
 export interface ContainerOutput {
@@ -85,6 +100,110 @@ export interface AgentExecutionLayout extends AgentRuntimePaths {
 interface WorkerLaunchSpec {
   command: string;
   args: string[];
+}
+
+function buildPromptPreview(prompt: string, maxChars: number): string {
+  if (prompt.length <= maxChars) {
+    return prompt;
+  }
+
+  const contextAwarePreview = buildContextAwarePromptPreview(prompt, maxChars);
+  if (contextAwarePreview) {
+    return contextAwarePreview;
+  }
+
+  return `${prompt.slice(0, maxChars)}\n${TRUNCATED_MARKER}`;
+}
+
+function buildContextAwarePromptPreview(
+  prompt: string,
+  maxChars: number,
+): string | null {
+  const recentTurnsLabel = findRecentTurnsLabel(prompt);
+  const currentInputIndex = prompt.indexOf('CURRENT_INPUT:');
+  if (!recentTurnsLabel || currentInputIndex < 0) {
+    return null;
+  }
+
+  const recentTurnsContentStart = prompt.indexOf('\n', recentTurnsLabel) + 1;
+  if (
+    recentTurnsContentStart <= 0 ||
+    recentTurnsContentStart >= currentInputIndex
+  ) {
+    return null;
+  }
+
+  const prefix = prompt.slice(0, recentTurnsContentStart);
+  const recentTurnsBody = prompt.slice(
+    recentTurnsContentStart,
+    currentInputIndex,
+  );
+  const suffix = prompt.slice(currentInputIndex);
+  const markerBlock = `${TRUNCATED_MARKER}: prompt preview omitted older recent turns to preserve CURRENT_INPUT\n`;
+  const fixedLength = prefix.length + suffix.length + markerBlock.length;
+
+  if (fixedLength >= maxChars) {
+    if (suffix.length + markerBlock.length >= maxChars) {
+      const tailBudget = Math.max(0, maxChars - markerBlock.length);
+      return `${markerBlock}${prompt.slice(-tailBudget)}`.slice(0, maxChars);
+    }
+
+    const prefixBudget = Math.max(
+      0,
+      maxChars - suffix.length - markerBlock.length,
+    );
+    const prefixPreview = trimToLineBoundary(prefix, prefixBudget);
+    return `${prefixPreview}${markerBlock}${suffix}`;
+  }
+
+  const recentTurnsBudget = maxChars - fixedLength;
+  const recentTurnsTail = trimRecentTurnsBodyFromFront(
+    recentTurnsBody,
+    recentTurnsBudget,
+  );
+  return `${prefix}${markerBlock}${recentTurnsTail}${suffix}`;
+}
+
+function findRecentTurnsLabel(prompt: string): number {
+  const recentTurnsIndex = prompt.indexOf('RECENT_TURNS:');
+  const selectedRecentTurnsIndex = prompt.indexOf('SELECTED_RECENT_TURNS:');
+
+  if (recentTurnsIndex < 0) {
+    return selectedRecentTurnsIndex;
+  }
+  if (selectedRecentTurnsIndex < 0) {
+    return recentTurnsIndex;
+  }
+
+  return Math.min(recentTurnsIndex, selectedRecentTurnsIndex);
+}
+
+function trimRecentTurnsBodyFromFront(text: string, maxChars: number): string {
+  if (text.length <= maxChars) {
+    return text;
+  }
+
+  const rawTail = text.slice(-maxChars);
+  const boundaryIndex = rawTail.indexOf('\n- role: ');
+  if (boundaryIndex > 0) {
+    return rawTail.slice(boundaryIndex + 1);
+  }
+
+  return rawTail;
+}
+
+function trimToLineBoundary(text: string, maxChars: number): string {
+  if (text.length <= maxChars) {
+    return text;
+  }
+
+  const preview = text.slice(0, maxChars);
+  const lastNewline = preview.lastIndexOf('\n');
+  if (lastNewline <= 0) {
+    return preview.endsWith('\n') ? preview : `${preview}\n`;
+  }
+
+  return preview.slice(0, lastNewline + 1);
 }
 
 function loadRemoteMcpEnv(
@@ -256,8 +375,93 @@ function redactRemoteMcpServersForLogging(
 function redactWorkerInputForLogging(input: ContainerInput): ContainerInput {
   return {
     ...input,
+    runtimePaths: input.runtimePaths
+      ? sanitizeAgentRuntimePathsForLogging(input.runtimePaths)
+      : input.runtimePaths,
     remoteMcpServers: redactRemoteMcpServersForLogging(input.remoteMcpServers),
+    ...(input.sdkSecrets
+      ? {
+          sdkSecrets: Object.fromEntries(
+            Object.keys(input.sdkSecrets).map((key) => [key, '[REDACTED]']),
+          ),
+        }
+      : {}),
+    ...(input.workerEnv
+      ? {
+          workerEnv: Object.fromEntries(
+            Object.keys(input.workerEnv).map((key) => [key, '[REDACTED]']),
+          ),
+        }
+      : {}),
   };
+}
+
+function sanitizeWorkerLogPath(filePath: string): string {
+  const normalized = path.normalize(filePath);
+  const relative = path.relative(process.cwd(), normalized);
+
+  if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) {
+    return relative;
+  }
+
+  return path.basename(normalized) || normalized;
+}
+
+function sanitizeAgentRuntimePathsForLogging(
+  runtimePaths: AgentRuntimePaths,
+): AgentRuntimePaths {
+  return {
+    groupPath: sanitizeWorkerLogPath(runtimePaths.groupPath),
+    ipcPath: sanitizeWorkerLogPath(runtimePaths.ipcPath),
+    codexHome: sanitizeWorkerLogPath(runtimePaths.codexHome),
+    additionalDirectories: runtimePaths.additionalDirectories.map(
+      sanitizeWorkerLogPath,
+    ),
+    writableRoots: runtimePaths.writableRoots.map(sanitizeWorkerLogPath),
+    sharedInstructionFiles: runtimePaths.sharedInstructionFiles.map(
+      sanitizeWorkerLogPath,
+    ),
+  };
+}
+
+function sanitizeAgentExecutionLayoutForLogging(
+  layout: AgentExecutionLayout,
+): AgentExecutionLayout {
+  return {
+    ...layout,
+    ...sanitizeAgentRuntimePathsForLogging(layout),
+    snapshotMappings: layout.snapshotMappings.map((mapping) => ({
+      ...mapping,
+      sourcePath: sanitizeWorkerLogPath(mapping.sourcePath),
+      targetPath: sanitizeWorkerLogPath(mapping.targetPath),
+    })),
+  };
+}
+
+function buildContextLogLines(input: ContainerInput): string[] {
+  if (!input.contextDebug) {
+    return [
+      '=== Context Summary ===',
+      'Bootstrap Used: unknown',
+      'Memory Refresh Used: unknown',
+      'Summary Included: unknown',
+      'Recent Turns Scope: unknown',
+      'Recent Turn Count: unknown',
+      'Rule Priority: CURRENT_INPUT > Shared Instructions > Structured Summary > Recent Turns > Session Background',
+      '',
+    ];
+  }
+
+  return [
+    '=== Context Summary ===',
+    `Bootstrap Used: ${input.contextDebug.bootstrapUsed}`,
+    `Memory Refresh Used: ${input.contextDebug.memoryRefreshUsed}`,
+    `Summary Included: ${input.contextDebug.summaryIncluded}`,
+    `Recent Turns Scope: ${input.contextDebug.recentTurnsScope}`,
+    `Recent Turn Count: ${input.contextDebug.recentTurnCount}`,
+    'Rule Priority: CURRENT_INPUT > Shared Instructions > Structured Summary > Recent Turns > Session Background',
+    '',
+  ];
 }
 
 function ensureGroupRuntimeDirs(groupFolder: string): {
@@ -316,46 +520,7 @@ function copySnapshot(
 }
 
 function dedupePaths(paths: string[]): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-
-  for (const value of paths) {
-    const resolved = path.resolve(value);
-    if (seen.has(resolved)) continue;
-    seen.add(resolved);
-    result.push(resolved);
-  }
-
-  return result;
-}
-
-function findInstructionFiles(rootPath: string): string[] {
-  const filenames = ['AGENTS.md', 'CLAUDE.md', 'preferences.md'];
-  const nestedRoot = path.join(rootPath, 'groups', path.basename(rootPath));
-  const rootCandidates = filenames.map((filename) =>
-    path.join(rootPath, filename),
-  );
-  const legacyCandidates = filenames
-    .map((filename) => {
-      const rootCandidate = path.join(rootPath, filename);
-      const legacyCandidate = path.join(nestedRoot, filename);
-      if (fs.existsSync(rootCandidate)) {
-        return null;
-      }
-      return legacyCandidate;
-    })
-    .filter((candidate): candidate is string => candidate !== null);
-  const candidates = [...rootCandidates, ...legacyCandidates];
-
-  const files: string[] = [];
-  for (const candidate of candidates) {
-    if (!fs.existsSync(candidate)) continue;
-    const content = fs.readFileSync(candidate, 'utf-8').trim();
-    if (!content) continue;
-    files.push(candidate);
-  }
-
-  return files;
+  return dedupeInstructionPaths(paths);
 }
 
 function resolveSnapshotTarget(
@@ -373,7 +538,7 @@ function resolveSnapshotTarget(
   return path.join(contextRoot, path.basename(containerPath));
 }
 
-function readSecrets(): Record<string, string> {
+function readSdkSecrets(): Record<string, string> {
   return readEnvFile([
     'OPENAI_API_KEY',
     'OPENAI_BASE_URL',
@@ -532,6 +697,7 @@ export async function runContainerAgent(
 
   const layout = buildAgentExecutionLayout(group, input.isMain);
   input.runtimePaths = layout;
+  const loggableLayout = sanitizeAgentExecutionLayoutForLogging(layout);
   const remoteMcpEnv = loadRemoteMcpEnv(group.containerConfig?.mcpServers);
   input.remoteMcpServers = sanitizeRemoteMcpServers(
     group.containerConfig?.mcpServers,
@@ -554,7 +720,7 @@ export async function runContainerAgent(
       executionName,
       command: launch.command,
       args: launch.args,
-      layout,
+      layout: loggableLayout,
     },
     'Agent execution configuration',
   );
@@ -564,8 +730,8 @@ export async function runContainerAgent(
       group: group.name,
       executionName,
       isMain: input.isMain,
-      writableRoots: layout.writableRoots,
-      additionalDirectories: layout.additionalDirectories,
+      writableRoots: loggableLayout.writableRoots,
+      additionalDirectories: loggableLayout.additionalDirectories,
     },
     'Spawning local Codex worker',
   );
@@ -586,10 +752,13 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    input.secrets = readSecrets();
+    input.sdkSecrets = readSdkSecrets();
+    input.workerEnv = resolveGroupWorkerEnv(group.folder);
+    const loggableInput = redactWorkerInputForLogging(input);
     worker.stdin.write(JSON.stringify(input));
     worker.stdin.end();
-    delete input.secrets;
+    delete input.sdkSecrets;
+    delete input.workerEnv;
 
     let parseBuffer = '';
     let newSessionId: string | undefined;
@@ -700,6 +869,8 @@ export async function runContainerAgent(
         const now = new Date();
         const ts = formatLocalTimestampForFilename(now);
         const timeoutLog = path.join(logsDir, `worker-${ts}.log`);
+        const loggableTimeoutLayout =
+          sanitizeAgentExecutionLayoutForLogging(layout);
         fs.writeFileSync(
           timeoutLog,
           [
@@ -710,6 +881,8 @@ export async function runContainerAgent(
             `Duration: ${duration}ms`,
             `Exit Code: ${code}`,
             `Had Streaming Output: ${hadStreamingOutput}`,
+            '=== Shared Instructions ===',
+            loggableTimeoutLayout.sharedInstructionFiles.join('\n') || '(none)',
           ].join('\n'),
         );
 
@@ -743,15 +916,14 @@ export async function runContainerAgent(
       const logFile = path.join(logsDir, `worker-${timestamp}.log`);
       const isVerbose =
         process.env.LOG_LEVEL === 'debug' || process.env.LOG_LEVEL === 'trace';
-      const MAX_WORKER_LOG_TEXT = 8000;
-      const promptPreview =
-        input.prompt.length > MAX_WORKER_LOG_TEXT
-          ? `${input.prompt.slice(0, MAX_WORKER_LOG_TEXT)}\n[TRUNCATED]`
-          : input.prompt;
+      const promptPreview = buildPromptPreview(
+        input.prompt,
+        MAX_WORKER_LOG_TEXT,
+      );
       const resultPreviewRaw = streamedResults.join('\n\n---\n\n');
       const resultPreview =
         resultPreviewRaw.length > MAX_WORKER_LOG_TEXT
-          ? `${resultPreviewRaw.slice(0, MAX_WORKER_LOG_TEXT)}\n[TRUNCATED]`
+          ? `${resultPreviewRaw.slice(0, MAX_WORKER_LOG_TEXT)}\n${TRUNCATED_MARKER}`
           : resultPreviewRaw;
       const logLines = [
         '=== Agent Run Log ===',
@@ -768,7 +940,7 @@ export async function runContainerAgent(
       if (isVerbose || code !== 0) {
         logLines.push(
           '=== Input ===',
-          JSON.stringify(redactWorkerInputForLogging(input), null, 2),
+          JSON.stringify(loggableInput, null, 2),
           '',
           '=== Worker Launch ===',
           `${launch.command} ${launch.args.join(' ')}`,
@@ -788,11 +960,15 @@ export async function runContainerAgent(
           `Prompt length: ${input.prompt.length} chars`,
           `Session ID: ${input.sessionId || 'new'}`,
           '',
+          ...buildContextLogLines(input),
           '=== Additional Directories ===',
-          layout.additionalDirectories.join('\n') || '(none)',
+          loggableLayout.additionalDirectories.join('\n') || '(none)',
           '',
           '=== Writable Roots ===',
-          layout.writableRoots.join('\n') || '(none)',
+          loggableLayout.writableRoots.join('\n') || '(none)',
+          '',
+          '=== Shared Instructions ===',
+          loggableLayout.sharedInstructionFiles.join('\n') || '(none)',
           '',
         );
 

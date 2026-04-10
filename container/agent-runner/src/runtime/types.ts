@@ -43,7 +43,8 @@ export interface ContainerInput {
   };
   maintenancePurpose?: 'summary-memory';
   suppressConversationArchive?: boolean;
-  secrets?: Record<string, string>;
+  sdkSecrets?: Record<string, string>;
+  workerEnv?: Record<string, string>;
 }
 
 export interface TurnUsage {
@@ -63,14 +64,20 @@ export interface RuntimeHooks {
   ) => void;
 }
 
+export interface IpcInputMessage {
+  type: 'message' | 'background_activity';
+  text: string;
+}
+
 export interface RuntimeIpc {
   shouldClose: () => boolean;
-  drainIpcInput: () => string[];
+  drainIpcInput: () => IpcInputMessage[];
   ipcPollMs: number;
 }
 
 export interface RunQueryInput {
   prompt: string;
+  backgroundOnly?: boolean;
   sessionId?: string;
   resumeAt?: string;
   mcpServerCommand: string;
@@ -84,6 +91,7 @@ export interface RunQueryResult {
   lastAssistantUuid?: string;
   closedDuringQuery: boolean;
   nextPrompt?: string;
+  nextPromptBackgroundOnly?: boolean;
   usage?: TurnUsage;
 }
 

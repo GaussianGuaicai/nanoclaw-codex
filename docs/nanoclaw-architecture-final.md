@@ -1,5 +1,9 @@
 # NanoClaw Skills Architecture
 
+> Note
+> This is a historical design document for the earlier Claude Code skill workflow.
+> Keep it as background context, not as the current runtime reference. For current behavior, prefer `README.md` and the repo-local skill docs under `.claude/skills/`.
+
 ## Core Principle
 
 Skills are self-contained, auditable packages that apply programmatically via standard git merge mechanics. Claude Code orchestrates the process — running git commands, reading skill manifests, and stepping in only when git can't resolve a conflict on its own. The system uses existing git features (`merge-file`, `rerere`, `apply`) rather than custom merge infrastructure.

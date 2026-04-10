@@ -65,16 +65,24 @@ Workers can only request those actions through the local MCP/IPC bridge. Authori
 
 ### 5. Credential Handling
 
-The worker receives only a filtered set of runtime secrets from `.env`:
+The worker receives two separate host-controlled inputs:
 
-- `OPENAI_API_KEY`
-- `OPENAI_BASE_URL`
-- `NANOCLAW_CODEX_*`
+- SDK secrets from `.env`:
+  - `OPENAI_API_KEY`
+  - `OPENAI_BASE_URL`
+  - `NANOCLAW_CODEX_*`
+- Optional group worker env vars from `~/.config/nanoclaw/group-secrets.json`
 
-These secrets are passed from host to worker input, then used to configure Codex. The worker does not blindly inherit the host shell environment, and Codex subprocesses are started with a minimal environment plus `CODEX_HOME`.
+SDK secrets are passed from host to worker input, then used to configure Codex.
+They are not exported to the worker process environment.
+
+Group worker env vars are exported only for the matching `group.folder`, so
+worker-launched commands and scripts can read them from `process.env`. Project
+`.env` is used only as a fallback for keys explicitly declared in that group's
+`env` map. This avoids blindly exposing the full project `.env` to workers.
 
 For the main group, the project root is exposed as a per-run snapshot with `.env`
-removed, so only the filtered runtime secrets above reach the worker.
+removed, so secrets still do not reach the worker via sandboxed files.
 
 Host-only secrets remain outside the worker runtime:
 

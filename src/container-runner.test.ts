@@ -4,23 +4,29 @@ import { PassThrough } from 'stream';
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
-const { fsMock, spawnMock, validateAdditionalMounts, readEnvFileMock } =
-  vi.hoisted(() => ({
-    fsMock: {
-      existsSync: vi.fn(() => false),
-      mkdirSync: vi.fn(),
-      writeFileSync: vi.fn(),
-      readFileSync: vi.fn(() => ''),
-      readdirSync: vi.fn(() => []),
-      statSync: vi.fn(() => ({ isDirectory: () => true })),
-      copyFileSync: vi.fn(),
-      cpSync: vi.fn(),
-      rmSync: vi.fn(),
-    },
-    spawnMock: vi.fn(),
-    validateAdditionalMounts: vi.fn(() => []),
-    readEnvFileMock: vi.fn(() => ({})),
-  }));
+const {
+  fsMock,
+  spawnMock,
+  validateAdditionalMounts,
+  readEnvFileMock,
+  resolveGroupWorkerEnvMock,
+} = vi.hoisted(() => ({
+  fsMock: {
+    existsSync: vi.fn(() => false),
+    mkdirSync: vi.fn(),
+    writeFileSync: vi.fn(),
+    readFileSync: vi.fn(() => ''),
+    readdirSync: vi.fn(() => []),
+    statSync: vi.fn(() => ({ isDirectory: () => true })),
+    copyFileSync: vi.fn(),
+    cpSync: vi.fn(),
+    rmSync: vi.fn(),
+  },
+  spawnMock: vi.fn(),
+  validateAdditionalMounts: vi.fn(() => []),
+  readEnvFileMock: vi.fn(() => ({})),
+  resolveGroupWorkerEnvMock: vi.fn(() => ({})),
+}));
 
 vi.mock('./config.js', () => ({
   AGENT_MAX_OUTPUT_SIZE: 10485760,
@@ -56,6 +62,10 @@ vi.mock('./mount-security.js', () => ({
 
 vi.mock('./env.js', () => ({
   readEnvFile: readEnvFileMock,
+}));
+
+vi.mock('./group-secrets.js', () => ({
+  resolveGroupWorkerEnv: resolveGroupWorkerEnvMock,
 }));
 
 function createFakeProcess() {
@@ -130,6 +140,7 @@ describe('container-runner worker execution', () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     readEnvFileMock.mockReturnValue({});
+    resolveGroupWorkerEnvMock.mockReturnValue({});
     fakeProc = createFakeProcess();
     spawnMock.mockReturnValue(fakeProc);
     validateAdditionalMounts.mockReturnValue([]);
@@ -275,6 +286,8 @@ describe('container-runner worker execution', () => {
   });
 
   it('writes prompt and streamed result into worker log when enabled', async () => {
+    mockExistingPaths(['/tmp/nanoclaw-test-groups/test-group/preferences.md']);
+
     const resultPromise = runContainerAgent(
       testGroup,
       {
@@ -283,6 +296,13 @@ describe('container-runner worker execution', () => {
         workerLogDetail: {
           includePrompt: true,
           includeResult: true,
+        },
+        contextDebug: {
+          bootstrapUsed: true,
+          memoryRefreshUsed: false,
+          summaryIncluded: true,
+          recentTurnsScope: 'source-only',
+          recentTurnCount: 3,
         },
       },
       () => {},
@@ -314,9 +334,92 @@ describe('container-runner worker execution', () => {
     expect(logWrite?.[1]).toMatch(
       /Timestamp: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}/,
     );
+    expect(logWrite?.[1]).toContain('=== Shared Instructions ===');
+    expect(logWrite?.[1]).toContain('=== Context Summary ===');
+    expect(logWrite?.[1]).toContain('Bootstrap Used: true');
+    expect(logWrite?.[1]).toContain('Memory Refresh Used: false');
+    expect(logWrite?.[1]).toContain('Summary Included: true');
+    expect(logWrite?.[1]).toContain('Recent Turns Scope: source-only');
+    expect(logWrite?.[1]).toContain('Recent Turn Count: 3');
+    expect(logWrite?.[1]).toContain(
+      'Rule Priority: CURRENT_INPUT > Shared Instructions > Structured Summary > Recent Turns > Session Background',
+    );
+    expect(logWrite?.[1]).toContain('preferences.md');
+    expect(logWrite?.[1]).not.toContain('/tmp/nanoclaw-test-groups/test-group');
     expect(logWrite?.[1]).toContain('WebSocket-triggered prompt body');
     expect(logWrite?.[1]).toContain('=== Result ===');
     expect(logWrite?.[1]).toContain('No user-facing action needed.');
+  });
+
+  it('truncates older recent turns before newer recent turns and current input', async () => {
+    const longPrompt = [
+      'CONTEXT_BUNDLE',
+      '',
+      'CONTEXT_RULES:',
+      '- Keep recent context for debugging.',
+      '',
+      'STRUCTURED_SUMMARY_YAML:',
+      'session_state:',
+      '  task: "Debug worker logs."',
+      '',
+      'RECENT_TURNS:',
+      '- role: user',
+      '  source: websocket',
+      '  at: 2026-04-01T00:00:00.000Z',
+      '  content: |',
+      `    OLDER TURN MARKER ${'A'.repeat(28000)}`,
+      '- role: assistant',
+      '  source: websocket',
+      '  at: 2026-04-03T00:00:00.000Z',
+      '  content: |',
+      `    NEWER TURN MARKER ${'B'.repeat(4000)}`,
+      '',
+      'CURRENT_INPUT:',
+      'source: websocket',
+      'content: |',
+      `  CURRENT INPUT MARKER ${'C'.repeat(6000)}`,
+    ].join('\n');
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        prompt: longPrompt,
+        workerLogDetail: {
+          includePrompt: true,
+        },
+      },
+      () => {},
+      async () => {},
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: '<internal>ok</internal>',
+      newSessionId: 'session-789',
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    await resultPromise;
+
+    const logWrite = fsMock.writeFileSync.mock.calls.find(
+      ([filePath]) =>
+        typeof filePath === 'string' && filePath.includes('worker-'),
+    );
+    const logText = String(logWrite?.[1] ?? '');
+
+    expect(logText).toContain('=== Prompt ===');
+    expect(logText).toContain('RECENT_TURNS:');
+    expect(logText).toContain(
+      '[TRUNCATED]: prompt preview omitted older recent turns to preserve CURRENT_INPUT',
+    );
+    expect(logText).not.toContain('OLDER TURN MARKER');
+    expect(logText).toContain('NEWER TURN MARKER');
+    expect(logText).toContain('CURRENT_INPUT:');
+    expect(logText).toContain('CURRENT INPUT MARKER');
   });
 
   it('includes worker stderr trace in successful worker logs', async () => {
@@ -428,7 +531,52 @@ describe('container-runner worker execution', () => {
     expect(workerInput.remoteMcpBridgeNames).toEqual(['internal_docs']);
   });
 
+  it('passes sdkSecrets and workerEnv to the worker input', async () => {
+    const stdinChunks: Buffer[] = [];
+    readEnvFileMock.mockReturnValue({
+      OPENAI_API_KEY: 'sdk-secret',
+    });
+    resolveGroupWorkerEnvMock.mockReturnValue({
+      HOME_ASSISTANT_URL: 'https://ha.example',
+      HASS_ACCESS_TOKEN: 'worker-secret',
+    });
+    fakeProc.stdin.on('data', (chunk) => {
+      stdinChunks.push(Buffer.from(chunk));
+    });
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      { ...testInput },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'ok',
+      newSessionId: 'session-worker-env',
+    });
+    fakeProc.emit('close', 0);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('success');
+
+    const workerInput = JSON.parse(Buffer.concat(stdinChunks).toString('utf8'));
+    expect(workerInput.sdkSecrets).toEqual({
+      OPENAI_API_KEY: 'sdk-secret',
+    });
+    expect(workerInput.workerEnv).toEqual({
+      HOME_ASSISTANT_URL: 'https://ha.example',
+      HASS_ACCESS_TOKEN: 'worker-secret',
+    });
+  });
+
   it('redacts remote MCP headers before writing worker logs', async () => {
+    readEnvFileMock.mockReturnValue({
+      OPENAI_API_KEY: 'sdk-secret',
+    });
+    resolveGroupWorkerEnvMock.mockReturnValue({
+      HASS_ACCESS_TOKEN: 'worker-secret',
+    });
     const resultPromise = runContainerAgent(
       {
         ...testGroup,
@@ -465,11 +613,16 @@ describe('container-runner worker execution', () => {
     const logContent = String(logWrite?.[1]);
     expect(logContent).toContain('"Authorization": "[REDACTED]"');
     expect(logContent).toContain('"X-Api-Key": "[REDACTED]"');
+    expect(logContent).toContain('"OPENAI_API_KEY": "[REDACTED]"');
+    expect(logContent).toContain('"HASS_ACCESS_TOKEN": "[REDACTED]"');
     expect(logContent).not.toContain('Bearer secret-token');
     expect(logContent).not.toContain('top-secret');
+    expect(logContent).not.toContain('sdk-secret');
+    expect(logContent).not.toContain('worker-secret');
   });
 
   it('timeout with no output resolves as error', async () => {
+    mockExistingPaths(['/tmp/nanoclaw-test-groups/test-group/preferences.md']);
     const onOutput = vi.fn(async () => {});
     const resultPromise = runContainerAgent(
       testGroup,
@@ -486,6 +639,16 @@ describe('container-runner worker execution', () => {
     expect(result.status).toBe('error');
     expect(result.error).toContain('timed out');
     expect(onOutput).not.toHaveBeenCalled();
+
+    const timeoutLog = fsMock.writeFileSync.mock.calls.find(
+      ([, content]) =>
+        typeof content === 'string' &&
+        content.includes('=== Agent Run Log (TIMEOUT) ==='),
+    );
+    expect(timeoutLog).toBeDefined();
+    expect(String(timeoutLog?.[1])).toContain('=== Shared Instructions ===');
+    expect(String(timeoutLog?.[1])).toContain('preferences.md');
+    expect(String(timeoutLog?.[1])).not.toContain('/tmp/nanoclaw-test-groups');
   });
 
   it('launches a local worker and injects runtimePaths into the worker input', async () => {

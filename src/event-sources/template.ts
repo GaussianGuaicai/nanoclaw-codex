@@ -7,9 +7,9 @@ import {
 
 const CHANNEL_REPLY_CONTRACT = [
   'Channel reply requirements:',
-  '- Send a concise user-facing reply suitable for the target channel.',
-  '- If no action is needed, still explain briefly what changed and why no action was taken.',
-  '- Do not return only <internal>...</internal> content.',
+  '- Decide whether this event needs a user-facing reply.',
+  '- If the user should be informed, send a concise user-facing reply suitable for the target channel.',
+  '- If no user-visible update is needed, return only <internal>...</internal> content.',
 ].join('\n');
 
 function getValueAtPath(

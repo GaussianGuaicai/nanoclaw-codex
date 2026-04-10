@@ -13,7 +13,7 @@ const reasoningEffortSchema = z.enum([
   'xhigh',
 ]);
 
-const partialContextConfigSchema = z.object({
+export const partialContextConfigSchema = z.object({
   enabled: z.boolean().optional(),
   summaryMemory: z
     .object({
@@ -97,27 +97,34 @@ export function getDefaultContextConfig(): ContextConfig {
 
 export function parseContextConfig(input: unknown): ContextConfig {
   const parsed = partialContextConfigSchema.parse(input);
+  return mergeContextConfig(defaultContextConfig, parsed);
+}
+
+export function mergeContextConfig(
+  base: ContextConfig,
+  patch: z.infer<typeof partialContextConfigSchema>,
+): ContextConfig {
   return {
-    enabled: parsed.enabled ?? defaultContextConfig.enabled,
+    enabled: patch.enabled ?? base.enabled,
     summaryMemory: {
-      ...defaultContextConfig.summaryMemory,
-      ...parsed.summaryMemory,
+      ...base.summaryMemory,
+      ...patch.summaryMemory,
     },
     compaction: {
-      ...defaultContextConfig.compaction,
-      ...parsed.compaction,
+      ...base.compaction,
+      ...patch.compaction,
       trigger: {
-        ...defaultContextConfig.compaction.trigger,
-        ...parsed.compaction?.trigger,
+        ...base.compaction.trigger,
+        ...patch.compaction?.trigger,
       },
       window: {
-        ...defaultContextConfig.compaction.window,
-        ...parsed.compaction?.window,
+        ...base.compaction.window,
+        ...patch.compaction?.window,
       },
     },
     sources: {
-      ...defaultContextConfig.sources,
-      ...parsed.sources,
+      ...base.sources,
+      ...patch.sources,
     },
   };
 }

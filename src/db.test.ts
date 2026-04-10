@@ -431,6 +431,33 @@ describe('task CRUD', () => {
     expect(getTaskById('task-2')!.status).toBe('paused');
   });
 
+  it('updates task agent config', () => {
+    createTask({
+      id: 'task-2-agent',
+      group_folder: 'main',
+      chat_jid: 'group@g.us',
+      prompt: 'test',
+      schedule_type: 'once',
+      schedule_value: '2024-06-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: null,
+      status: 'active',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    updateTask('task-2-agent', {
+      agent_config: {
+        model: 'gpt-5.4-mini',
+        reasoningEffort: 'high',
+      },
+    });
+
+    expect(getTaskById('task-2-agent')!.agent_config).toEqual({
+      model: 'gpt-5.4-mini',
+      reasoningEffort: 'high',
+    });
+  });
+
   it('deletes a task and its run logs', () => {
     createTask({
       id: 'task-3',

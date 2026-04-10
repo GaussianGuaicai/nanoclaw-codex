@@ -68,6 +68,10 @@ import { runSingleTurnAgentTask } from './agent-task-runner.js';
 import { WebSocketSourceManager } from './event-sources/manager.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import {
+  loadWorkerAgentConfig,
+  startWorkerConfigWatcher,
+} from './worker-config.js';
+import {
   AgentExecutionConfig,
   Channel,
   NewMessage,
@@ -323,7 +327,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   if (finalResponse) {
-    const participation = isContextSourceEnabled({ source: 'chat' });
+    const participation = isContextSourceEnabled({
+      source: 'chat',
+      groupFolder: group.folder,
+    });
     if (participation.enabled) {
       const sessionKey = buildLiveSessionKey({
         groupFolder: group.folder,
@@ -379,7 +386,10 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<ContainerOutput> {
   const isMain = group.isMain === true;
-  const participation = isContextSourceEnabled({ source: 'chat' });
+  const participation = isContextSourceEnabled({
+    source: 'chat',
+    groupFolder: group.folder,
+  });
   const sessionKey = buildLiveSessionKey({
     groupFolder: group.folder,
     source: 'chat',
@@ -463,6 +473,7 @@ async function runAgent(
     const resolvedAgentConfig = resolveAgentExecutionConfig({
       source: 'chat',
       group,
+      workerConfig: loadWorkerAgentConfig(group.folder),
     });
     if (!resolvedAgentConfig.ok) {
       logger.error(
@@ -848,6 +859,11 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
+    reloadWebSocketSources: async () => {
+      if (webSocketSourceManager) {
+        await webSocketSourceManager.reload();
+      }
+    },
   });
   webSocketSourceManager = new WebSocketSourceManager({
     getRegisteredGroups: () => registeredGroups,
@@ -865,6 +881,14 @@ async function main(): Promise<void> {
     },
   });
   await webSocketSourceManager.start();
+  startWorkerConfigWatcher({
+    registeredGroups: () => registeredGroups,
+    onChange: async () => {
+      if (webSocketSourceManager) {
+        await webSocketSourceManager.reload();
+      }
+    },
+  });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {

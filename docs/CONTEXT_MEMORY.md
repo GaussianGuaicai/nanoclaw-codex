@@ -61,7 +61,10 @@ The summary pipeline writes to `store/messages.db`:
 
 - `context_turns` stores user and assistant turns, token estimates, actual usage, and a batch ID
 - `group_memory_state` stores the YAML summary plus the last summarized and compacted turn IDs
+- `context_memory_events` stores a durable audit trail for summary updates and compaction runs, including the summary YAML before/after, delta turn IDs, compaction boundary changes, and whether the session was restarted
 - `sessions` stores the current live Codex session IDs, scoped by chat or group event source
+
+Detailed summary and compaction audit state lives in `context_memory_events`. Worker logs remain useful for bootstrap and refresh verification, but the audit table is the source of truth for what changed.
 
 ## Verification
 
@@ -69,7 +72,8 @@ The summary pipeline writes to `store/messages.db`:
 2. Restart the NanoClaw launchd service.
 3. Send a chat message or trigger a WebSocket event for a group that uses `contextMode: "group"`.
 4. Check `store/messages.db` for `context_turns` and `group_memory_state`.
-5. Inspect `groups/<group>/logs/worker-*.log` for the latest context summary lines:
+5. Inspect `context_memory_events` for the summary and compaction audit trail.
+6. Inspect `groups/<group>/logs/worker-*.log` for the latest context summary lines:
    - fresh session: `Bootstrap Used: true`
    - resumed session: `Memory Refresh Used: true`
    - summary maintenance worker: context summary fields may be `unknown` because it is an internal maintenance prompt
@@ -79,6 +83,9 @@ Useful checks:
 ```bash
 sqlite3 store/messages.db \
   "SELECT group_folder, last_summarized_turn_id, last_compacted_turn_id, last_summary_at FROM group_memory_state;"
+
+sqlite3 store/messages.db \
+  "SELECT group_folder, event_type, created_at FROM context_memory_events ORDER BY id DESC LIMIT 10;"
 
 sqlite3 store/messages.db \
   "SELECT group_folder, session_id FROM sessions ORDER BY group_folder;"

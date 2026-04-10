@@ -351,6 +351,77 @@ describe('container-runner worker execution', () => {
     expect(logWrite?.[1]).toContain('No user-facing action needed.');
   });
 
+  it('truncates older recent turns before newer recent turns and current input', async () => {
+    const longPrompt = [
+      'CONTEXT_BUNDLE',
+      '',
+      'CONTEXT_RULES:',
+      '- Keep recent context for debugging.',
+      '',
+      'STRUCTURED_SUMMARY_YAML:',
+      'session_state:',
+      '  task: "Debug worker logs."',
+      '',
+      'RECENT_TURNS:',
+      '- role: user',
+      '  source: websocket',
+      '  at: 2026-04-01T00:00:00.000Z',
+      '  content: |',
+      `    OLDER TURN MARKER ${'A'.repeat(28000)}`,
+      '- role: assistant',
+      '  source: websocket',
+      '  at: 2026-04-03T00:00:00.000Z',
+      '  content: |',
+      `    NEWER TURN MARKER ${'B'.repeat(4000)}`,
+      '',
+      'CURRENT_INPUT:',
+      'source: websocket',
+      'content: |',
+      `  CURRENT INPUT MARKER ${'C'.repeat(6000)}`,
+    ].join('\n');
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        prompt: longPrompt,
+        workerLogDetail: {
+          includePrompt: true,
+        },
+      },
+      () => {},
+      async () => {},
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: '<internal>ok</internal>',
+      newSessionId: 'session-789',
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    await resultPromise;
+
+    const logWrite = fsMock.writeFileSync.mock.calls.find(
+      ([filePath]) =>
+        typeof filePath === 'string' && filePath.includes('worker-'),
+    );
+    const logText = String(logWrite?.[1] ?? '');
+
+    expect(logText).toContain('=== Prompt ===');
+    expect(logText).toContain('RECENT_TURNS:');
+    expect(logText).toContain(
+      '[TRUNCATED]: prompt preview omitted older recent turns to preserve CURRENT_INPUT',
+    );
+    expect(logText).not.toContain('OLDER TURN MARKER');
+    expect(logText).toContain('NEWER TURN MARKER');
+    expect(logText).toContain('CURRENT_INPUT:');
+    expect(logText).toContain('CURRENT INPUT MARKER');
+  });
+
   it('includes worker stderr trace in successful worker logs', async () => {
     const resultPromise = runContainerAgent(
       testGroup,

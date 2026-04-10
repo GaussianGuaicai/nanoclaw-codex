@@ -36,6 +36,8 @@ import {
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 const EXTRA_SNAPSHOT_PREFIX = '/workspace/extra/';
+const MAX_WORKER_LOG_TEXT = 30000;
+const TRUNCATED_MARKER = '[TRUNCATED]';
 
 export interface AgentRuntimePaths {
   groupPath: string;
@@ -98,6 +100,110 @@ export interface AgentExecutionLayout extends AgentRuntimePaths {
 interface WorkerLaunchSpec {
   command: string;
   args: string[];
+}
+
+function buildPromptPreview(prompt: string, maxChars: number): string {
+  if (prompt.length <= maxChars) {
+    return prompt;
+  }
+
+  const contextAwarePreview = buildContextAwarePromptPreview(prompt, maxChars);
+  if (contextAwarePreview) {
+    return contextAwarePreview;
+  }
+
+  return `${prompt.slice(0, maxChars)}\n${TRUNCATED_MARKER}`;
+}
+
+function buildContextAwarePromptPreview(
+  prompt: string,
+  maxChars: number,
+): string | null {
+  const recentTurnsLabel = findRecentTurnsLabel(prompt);
+  const currentInputIndex = prompt.indexOf('CURRENT_INPUT:');
+  if (!recentTurnsLabel || currentInputIndex < 0) {
+    return null;
+  }
+
+  const recentTurnsContentStart = prompt.indexOf('\n', recentTurnsLabel) + 1;
+  if (
+    recentTurnsContentStart <= 0 ||
+    recentTurnsContentStart >= currentInputIndex
+  ) {
+    return null;
+  }
+
+  const prefix = prompt.slice(0, recentTurnsContentStart);
+  const recentTurnsBody = prompt.slice(
+    recentTurnsContentStart,
+    currentInputIndex,
+  );
+  const suffix = prompt.slice(currentInputIndex);
+  const markerBlock = `${TRUNCATED_MARKER}: prompt preview omitted older recent turns to preserve CURRENT_INPUT\n`;
+  const fixedLength = prefix.length + suffix.length + markerBlock.length;
+
+  if (fixedLength >= maxChars) {
+    if (suffix.length + markerBlock.length >= maxChars) {
+      const tailBudget = Math.max(0, maxChars - markerBlock.length);
+      return `${markerBlock}${prompt.slice(-tailBudget)}`.slice(0, maxChars);
+    }
+
+    const prefixBudget = Math.max(
+      0,
+      maxChars - suffix.length - markerBlock.length,
+    );
+    const prefixPreview = trimToLineBoundary(prefix, prefixBudget);
+    return `${prefixPreview}${markerBlock}${suffix}`;
+  }
+
+  const recentTurnsBudget = maxChars - fixedLength;
+  const recentTurnsTail = trimRecentTurnsBodyFromFront(
+    recentTurnsBody,
+    recentTurnsBudget,
+  );
+  return `${prefix}${markerBlock}${recentTurnsTail}${suffix}`;
+}
+
+function findRecentTurnsLabel(prompt: string): number {
+  const recentTurnsIndex = prompt.indexOf('RECENT_TURNS:');
+  const selectedRecentTurnsIndex = prompt.indexOf('SELECTED_RECENT_TURNS:');
+
+  if (recentTurnsIndex < 0) {
+    return selectedRecentTurnsIndex;
+  }
+  if (selectedRecentTurnsIndex < 0) {
+    return recentTurnsIndex;
+  }
+
+  return Math.min(recentTurnsIndex, selectedRecentTurnsIndex);
+}
+
+function trimRecentTurnsBodyFromFront(text: string, maxChars: number): string {
+  if (text.length <= maxChars) {
+    return text;
+  }
+
+  const rawTail = text.slice(-maxChars);
+  const boundaryIndex = rawTail.indexOf('\n- role: ');
+  if (boundaryIndex > 0) {
+    return rawTail.slice(boundaryIndex + 1);
+  }
+
+  return rawTail;
+}
+
+function trimToLineBoundary(text: string, maxChars: number): string {
+  if (text.length <= maxChars) {
+    return text;
+  }
+
+  const preview = text.slice(0, maxChars);
+  const lastNewline = preview.lastIndexOf('\n');
+  if (lastNewline <= 0) {
+    return preview.endsWith('\n') ? preview : `${preview}\n`;
+  }
+
+  return preview.slice(0, lastNewline + 1);
 }
 
 function loadRemoteMcpEnv(
@@ -810,15 +916,14 @@ export async function runContainerAgent(
       const logFile = path.join(logsDir, `worker-${timestamp}.log`);
       const isVerbose =
         process.env.LOG_LEVEL === 'debug' || process.env.LOG_LEVEL === 'trace';
-      const MAX_WORKER_LOG_TEXT = 8000;
-      const promptPreview =
-        input.prompt.length > MAX_WORKER_LOG_TEXT
-          ? `${input.prompt.slice(0, MAX_WORKER_LOG_TEXT)}\n[TRUNCATED]`
-          : input.prompt;
+      const promptPreview = buildPromptPreview(
+        input.prompt,
+        MAX_WORKER_LOG_TEXT,
+      );
       const resultPreviewRaw = streamedResults.join('\n\n---\n\n');
       const resultPreview =
         resultPreviewRaw.length > MAX_WORKER_LOG_TEXT
-          ? `${resultPreviewRaw.slice(0, MAX_WORKER_LOG_TEXT)}\n[TRUNCATED]`
+          ? `${resultPreviewRaw.slice(0, MAX_WORKER_LOG_TEXT)}\n${TRUNCATED_MARKER}`
           : resultPreviewRaw;
       const logLines = [
         '=== Agent Run Log ===',

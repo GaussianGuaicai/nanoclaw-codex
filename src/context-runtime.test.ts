@@ -9,6 +9,10 @@ vi.mock('./context-config.js', () => ({
   loadContextConfig: loadContextConfigMock,
 }));
 
+vi.mock('./worker-config.js', () => ({
+  mergeWorkerContextConfig: (base: unknown) => base,
+}));
+
 vi.mock('./summary-memory.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./summary-memory.js')>();
   return {
@@ -21,6 +25,7 @@ import {
   _initTestDatabase,
   insertContextTurn,
   getOrCreateGroupMemoryState,
+  listContextMemoryEventsForGroup,
   listContextTurnsForGroup,
   updateGroupMemoryState,
 } from './db.js';
@@ -465,6 +470,36 @@ describe('recordCompletedContextTurn', () => {
     expect(state.last_output_tokens).toBe(300);
     expect(closeWorker).not.toHaveBeenCalled();
     expect(clearSessionCache).not.toHaveBeenCalled();
+
+    const events = listContextMemoryEventsForGroup(testGroup.folder);
+    expect(events).toHaveLength(1);
+    const payload = JSON.parse(events[0].payload_json) as {
+      version: number;
+      summary: {
+        attempted: boolean;
+        succeeded: boolean;
+        repaired: boolean;
+        deltaTurnCount: number;
+        before: { summaryYaml: string };
+        after: { summaryYaml: string } | null;
+      };
+      compaction: {
+        attempted: boolean;
+        shouldCompact: boolean;
+        boundaryAfter: number;
+      };
+    };
+    expect(payload.version).toBe(1);
+    expect(payload.summary.attempted).toBe(true);
+    expect(payload.summary.succeeded).toBe(true);
+    expect(payload.summary.repaired).toBe(false);
+    expect(payload.summary.deltaTurnCount).toBe(2);
+    expect(payload.summary.before.summaryYaml).toContain('session_state:');
+    expect(payload.summary.after?.summaryYaml).toContain(
+      'Track the latest conversation state.',
+    );
+    expect(payload.compaction.attempted).toBe(false);
+    expect(payload.compaction.shouldCompact).toBe(false);
   });
 
   it('advances the compaction boundary and clears the session when the window is exceeded', async () => {
@@ -527,6 +562,7 @@ describe('recordCompletedContextTurn', () => {
 
     const state = getOrCreateGroupMemoryState(testGroup.folder);
     const turns = listContextTurnsForGroup(testGroup.folder);
+    const events = listContextMemoryEventsForGroup(testGroup.folder);
 
     expect(turns).toHaveLength(4);
     expect(updateSummaryMemoryMock).not.toHaveBeenCalled();
@@ -535,6 +571,22 @@ describe('recordCompletedContextTurn', () => {
     expect(state.last_summarized_turn_id).toBe(0);
     expect(closeWorker).toHaveBeenCalledTimes(1);
     expect(clearSessionCache).toHaveBeenCalledTimes(1);
+    expect(events).toHaveLength(2);
+
+    const latestPayload = JSON.parse(events[1].payload_json) as {
+      summary: { attempted: boolean };
+      compaction: {
+        attempted: boolean;
+        shouldCompact: boolean;
+        boundaryAfter: number;
+        sessionRestarted: boolean;
+      };
+    };
+    expect(latestPayload.summary.attempted).toBe(false);
+    expect(latestPayload.compaction.attempted).toBe(true);
+    expect(latestPayload.compaction.shouldCompact).toBe(true);
+    expect(latestPayload.compaction.boundaryAfter).toBe(2);
+    expect(latestPayload.compaction.sessionRestarted).toBe(true);
   });
 });
 

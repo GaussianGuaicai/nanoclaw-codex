@@ -120,6 +120,15 @@ function createSchema(database: Database.Database): void {
       last_input_tokens INTEGER,
       last_output_tokens INTEGER
     );
+    CREATE TABLE IF NOT EXISTS context_memory_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_folder TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      payload_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_context_memory_events_group_time
+    ON context_memory_events(group_folder, created_at);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -469,7 +478,12 @@ export function updateTask(
   updates: Partial<
     Pick<
       ScheduledTask,
-      'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status'
+      | 'prompt'
+      | 'schedule_type'
+      | 'schedule_value'
+      | 'next_run'
+      | 'status'
+      | 'agent_config'
     >
   >,
 ): void {
@@ -495,6 +509,12 @@ export function updateTask(
   if (updates.status !== undefined) {
     fields.push('status = ?');
     values.push(updates.status);
+  }
+  if (updates.agent_config !== undefined) {
+    fields.push('agent_config = ?');
+    values.push(
+      updates.agent_config ? JSON.stringify(updates.agent_config) : null,
+    );
   }
 
   if (fields.length === 0) return;
@@ -858,6 +878,58 @@ export function updateGroupMemoryState(
   );
 
   return next;
+}
+
+export function insertContextMemoryEvent(params: {
+  group_folder: string;
+  event_type: string;
+  created_at: string;
+  payload: Record<string, unknown>;
+}): number {
+  const result = db
+    .prepare(
+      `
+      INSERT INTO context_memory_events (
+        group_folder,
+        event_type,
+        created_at,
+        payload_json
+      ) VALUES (?, ?, ?, ?)
+    `,
+    )
+    .run(
+      params.group_folder,
+      params.event_type,
+      params.created_at,
+      JSON.stringify(params.payload),
+    );
+
+  return Number(result.lastInsertRowid);
+}
+
+export function listContextMemoryEventsForGroup(groupFolder: string): Array<{
+  id: number;
+  group_folder: string;
+  event_type: string;
+  created_at: string;
+  payload_json: string;
+}> {
+  return db
+    .prepare(
+      `
+      SELECT *
+      FROM context_memory_events
+      WHERE group_folder = ?
+      ORDER BY id
+    `,
+    )
+    .all(groupFolder) as Array<{
+    id: number;
+    group_folder: string;
+    event_type: string;
+    created_at: string;
+    payload_json: string;
+  }>;
 }
 
 // --- Registered group accessors ---

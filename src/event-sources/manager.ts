@@ -38,8 +38,8 @@ export class WebSocketSourceManager {
   }
 
   async start(): Promise<void> {
-    const config = loadWebSocketSourcesConfig();
     const registeredGroups = this.getRegisteredGroups();
+    const config = loadWebSocketSourcesConfig(registeredGroups);
     const subscriptionsByConnection = new Map<
       string,
       WebSocketSubscriptionConfig[]
@@ -148,6 +148,12 @@ export class WebSocketSourceManager {
       [...this.connections.values()].map((connection) => connection.stop()),
     );
     this.connections.clear();
+  }
+
+  async reload(): Promise<void> {
+    await this.stop();
+    this.lastTriggeredAt.clear();
+    await this.start();
   }
 
   private shouldTrigger(subscription: WebSocketSubscriptionConfig): boolean {

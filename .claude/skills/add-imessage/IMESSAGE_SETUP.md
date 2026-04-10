@@ -18,11 +18,8 @@ IMESSAGE_POLL_INTERVAL_MS=1500
 IMESSAGE_DB_PATH=~/Library/Messages/chat.db
 ```
 
-Then sync:
-
-```bash
-mkdir -p data/env && cp .env data/env/env
-```
+The current local-worker runtime reads `.env` from the host directly; do not sync `.env` into `data/env/env`.
+If you only want iMessage for one group, use a group-scoped `workerEnv` override in `~/.config/nanoclaw/group-secrets.json` instead of enabling it globally.
 
 ## Build and restart
 

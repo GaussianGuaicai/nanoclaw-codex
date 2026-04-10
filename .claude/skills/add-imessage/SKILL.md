@@ -103,11 +103,8 @@ IMESSAGE_POLL_INTERVAL_MS=1500
 IMESSAGE_DB_PATH=~/Library/Messages/chat.db
 ```
 
-Then sync the environment into NanoClaw's runtime env file:
-
-```bash
-mkdir -p data/env && cp .env data/env/env
-```
+The current local-worker runtime reads `.env` from the host directly; there is no `data/env/env` sync step.
+If you want iMessage enabled only for one group, prefer a group-scoped override in `~/.config/nanoclaw/group-secrets.json` instead of a global `.env` toggle.
 
 ## Behavior
 
@@ -115,6 +112,7 @@ mkdir -p data/env && cp .env data/env/env
 - If the host platform is not macOS, the factory skips registration cleanly
 - If the backend is `bluebubbles`, startup skips the channel and logs a clear **not implemented yet** message
 - If `IMESSAGE_DB_PATH` is missing, startup skips the channel and logs a clear warning
+- If `IMESSAGE_DB_PATH` points to a missing file, startup skips the channel and logs a clear warning
 - Missing config must not crash the whole service; connection failures are logged clearly
 - On first boot with no checkpoint, the local backend seeds checkpoint to the latest message row to avoid historical backfill storms
 

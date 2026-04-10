@@ -1,17 +1,19 @@
 ---
 name: add-telegram-swarm
-description: Add Agent Swarm (Teams) support to Telegram. Each subagent gets its own bot identity in the group. Requires Telegram channel to be set up first (use /add-telegram). Triggers on "agent swarm", "agent teams telegram", "telegram swarm", "bot pool".
+description: Add Agent Swarm (Teams) support to Telegram. Each subagent gets its own bot identity in the group. Requires Telegram channel to be set up first (use $add-telegram). Triggers on "agent swarm", "agent teams telegram", "telegram swarm", "bot pool".
 ---
 
 # Add Agent Swarm to Telegram
 
 This skill adds Agent Teams (Swarm) support to an existing Telegram channel. Each subagent in a team gets its own bot identity in the Telegram group, so users can visually distinguish which agent is speaking.
 
-**Prerequisite**: Telegram must already be set up via the `/add-telegram` skill. If `src/telegram.ts` does not exist or `TELEGRAM_BOT_TOKEN` is not configured, tell the user to run `/add-telegram` first.
+**Current runtime note:** This skill predates the local Codex worker refactor and may require porting before direct application. The `send_message` MCP tool already accepts an optional `sender` parameter in `container/agent-runner/src/ipc-mcp-stdio.ts`; the remaining work is mainly Telegram-channel pool routing in `src/channels/telegram.ts` and host IPC handling in `src/ipc.ts`.
+
+**Prerequisite**: Telegram must already be set up via the `$add-telegram` skill. If `src/channels/telegram.ts` does not exist or `TELEGRAM_BOT_TOKEN` is not configured, tell the user to run `$add-telegram` first.
 
 ## How It Works
 
-- The **main bot** receives messages and sends lead agent responses (already set up by `/add-telegram`)
+- The **main bot** receives messages and sends lead agent responses (already set up by `$add-telegram`)
 - **Pool bots** are send-only — each gets a Grammy `Api` instance (no polling)
 - When a subagent calls `send_message` with a `sender` parameter, the host assigns a pool bot and renames it to match the sender's role
 - Messages appear in Telegram from different bot identities
@@ -70,7 +72,7 @@ export const TELEGRAM_BOT_POOL = (process.env.TELEGRAM_BOT_POOL || '')
 
 ### Step 2: Add Bot Pool to Telegram Module
 
-Read `src/telegram.ts` and add the following:
+Read `src/channels/telegram.ts` and add the following:
 
 1. **Update imports** — add `Api` to the Grammy import:
 
@@ -237,7 +239,7 @@ if (TELEGRAM_BOT_POOL.length > 0) {
 
 #### 5a. Add global message formatting rules
 
-Read `groups/global/CLAUDE.md` and add a Message Formatting section:
+Read `groups/global/AGENTS.md` and add a Message Formatting section:
 
 ```markdown
 ## Message Formatting
@@ -253,7 +255,7 @@ No ## headings. No [links](url). No **double stars**.
 
 #### 5b. Update existing group CLAUDE.md headings
 
-In any group CLAUDE.md that has a "WhatsApp Formatting" section (e.g. `groups/main/CLAUDE.md`), rename the heading to reflect multi-channel support:
+In any group `AGENTS.md` that has a "WhatsApp Formatting" section (e.g. `groups/main/AGENTS.md`), rename the heading to reflect multi-channel support:
 
 ```
 ## WhatsApp Formatting (and other messaging apps)
@@ -261,7 +263,7 @@ In any group CLAUDE.md that has a "WhatsApp Formatting" section (e.g. `groups/ma
 
 #### 5c. Add Agent Teams instructions to Telegram groups
 
-For each Telegram group that will use agent teams, create or update its `groups/{folder}/CLAUDE.md` with these instructions. Read the existing CLAUDE.md first (or `groups/global/CLAUDE.md` as a base) and add the Agent Teams section:
+For each Telegram group that will use agent teams, create or update its `groups/{folder}/AGENTS.md` with these instructions. Read the existing `AGENTS.md` first (or `groups/global/AGENTS.md` as a base) and add the Agent Teams section:
 
 ```markdown
 ## Agent Teams
@@ -308,27 +310,16 @@ Add pool tokens to `.env`:
 TELEGRAM_BOT_POOL=TOKEN1,TOKEN2,TOKEN3,...
 ```
 
-**Important**: Sync to all required locations:
-
-```bash
-cp .env data/env/env
-```
-
-Also add `TELEGRAM_BOT_POOL` to the launchd plist (`~/Library/LaunchAgents/com.nanoclaw.plist`) in the `EnvironmentVariables` dict if using launchd.
+The current local-worker runtime reads `.env` through the host. There is no `data/env/env` sync step.
 
 ### Step 7: Rebuild and Restart
 
 ```bash
 npm run build
-./container/build.sh  # Required — MCP tool changed
-# macOS:
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 # Linux:
 # systemctl --user restart nanoclaw
 ```
-
-Must use `unload/load` (macOS) or `restart` (Linux) because the service env vars changed.
 
 ### Step 8: Test
 
@@ -368,17 +359,17 @@ Telegram caches bot names client-side. The 2-second delay after `setMyName` help
 
 ### Subagents not using send_message
 
-Check the group's `CLAUDE.md` has the Agent Teams instructions. The lead agent reads this when creating teammates and must include the `send_message` + `sender` instructions in each teammate's prompt.
+Check the group's `AGENTS.md` has the Agent Teams instructions. The lead agent reads this when creating teammates and must include the `send_message` + `sender` instructions in each teammate's prompt.
 
 ## Removal
 
 To remove Agent Swarm support while keeping basic Telegram:
 
 1. Remove `TELEGRAM_BOT_POOL` from `src/config.ts`
-2. Remove pool code from `src/telegram.ts` (`poolApis`, `senderBotMap`, `initBotPool`, `sendPoolMessage`)
+2. Remove pool code from `src/channels/telegram.ts` (`poolApis`, `senderBotMap`, `initBotPool`, `sendPoolMessage`)
 3. Remove pool routing from IPC handler in `src/index.ts` (revert to plain `sendMessage`)
 4. Remove `initBotPool` call from `main()`
 5. Remove `sender` param from MCP tool in `container/agent-runner/src/ipc-mcp-stdio.ts`
-6. Remove Agent Teams section from group CLAUDE.md files
-7. Remove `TELEGRAM_BOT_POOL` from `.env`, `data/env/env`, and launchd plist/systemd unit
-8. Rebuild: `npm run build && ./container/build.sh && launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist && launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist` (macOS) or `npm run build && ./container/build.sh && systemctl --user restart nanoclaw` (Linux)
+6. Remove Agent Teams section from group `AGENTS.md` files
+7. Remove `TELEGRAM_BOT_POOL` from `.env`
+8. Rebuild: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)

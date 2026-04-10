@@ -15,9 +15,7 @@ Read `.nanoclaw/state.yaml`. If `voice-transcription` is in `applied_skills`, sk
 
 ### Ask the user
 
-Use `AskUserQuestion` to collect information:
-
-AskUserQuestion: Do you have an OpenAI API key for Whisper transcription?
+Ask whether the user has an OpenAI API key for Whisper transcription.
 
 If yes, collect it now. If no, direct them to create one at https://platform.openai.com/api-keys.
 
@@ -84,14 +82,7 @@ Add to `.env`:
 ```bash
 OPENAI_API_KEY=<their-key>
 ```
-
-Sync to container environment:
-
-```bash
-mkdir -p data/env && cp .env data/env/env
-```
-
-The container reads environment from `data/env/env`, not `.env` directly.
+The current local-worker runtime reads `.env` through the host; there is no `data/env/env` sync step.
 
 ### Build and restart
 
@@ -125,7 +116,7 @@ Look for:
 
 ### Voice notes show "[Voice Message - transcription unavailable]"
 
-1. Check `OPENAI_API_KEY` is set in `.env` AND synced to `data/env/env`
+1. Check `OPENAI_API_KEY` is set in `.env`
 2. Verify key works: `curl -s https://api.openai.com/v1/models -H "Authorization: Bearer $OPENAI_API_KEY" | head -c 200`
 3. Check OpenAI billing — Whisper requires a funded account
 

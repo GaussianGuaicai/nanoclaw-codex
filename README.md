@@ -172,7 +172,7 @@ The runtime defaults to `workspace-write` sandbox mode with `approval_policy=nev
 - Host-side WebSocket event subscriptions with immediate task execution
 - Skill-based channel installation (`$add-whatsapp`, `$add-telegram`, `$add-slack`, `$add-discord`, `$add-gmail`)
 
-The core intentionally does not bundle channel implementations. Channels are added by skills that patch `src/channels/` and self-register at startup.
+The base core is intentionally channel-light. Channels are added by skills that patch `src/channels/` and self-register at startup. Customized checkouts may already include applied channel skills; this checkout currently has Slack applied, which is why `src/channels/slack.ts` is present.
 
 ## Requirements
 
@@ -243,7 +243,7 @@ Key files:
 
 The main security boundary is now Codex sandbox policy plus host-side directory orchestration, not Linux VM/container isolation.
 
-- Main group can edit the repo root.
+- Main group can inspect a sanitized read-only snapshot of the repo root. Repo writes require an explicitly approved writable root or a human-run Codex session in the workspace.
 - Non-main groups are limited to their own group directory plus any host-approved extra roots or snapshots.
 - Extra writable roots are validated against an external allowlist at `~/.config/nanoclaw/mount-allowlist.json`.
 - WebSocket event-source config stays host-side in `~/.config/nanoclaw/websocket-sources.json`.

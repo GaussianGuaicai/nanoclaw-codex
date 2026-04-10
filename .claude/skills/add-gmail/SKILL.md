@@ -15,9 +15,7 @@ Read `.nanoclaw/state.yaml`. If `gmail` is in `applied_skills`, skip to Phase 3 
 
 ### Ask the user
 
-Use `AskUserQuestion`:
-
-AskUserQuestion: Should incoming emails be able to trigger the agent?
+Ask whether incoming emails should be able to trigger the agent.
 
 - **Yes** — Full channel mode: the agent listens on Gmail and responds to incoming emails automatically
 - **No** — Tool-only: the agent gets full Gmail tools (read, send, search, draft) but won't monitor the inbox. No channel code is added.
@@ -36,13 +34,13 @@ npx tsx scripts/apply-skill.ts --init
 
 Do NOT run the full apply script. Only two source files need changes. This avoids adding dead code (`gmail.ts`, `gmail.test.ts`, index.ts channel logic, routing tests, `googleapis` dependency).
 
-#### 1. Mount Gmail credentials in container
+#### 1. Expose Gmail credentials to the local worker
 
-Apply the changes described in `modify/src/container-runner.ts.intent.md` to `src/container-runner.ts`: import `os`, add a conditional read-write mount of `~/.gmail-mcp` to `/home/node/.gmail-mcp` in `buildVolumeMounts()` after the session mounts.
+The old container mount instructions are obsolete. For the current local worker, prefer a group-scoped `workerEnv` entry in `~/.config/nanoclaw/group-secrets.json` or an explicit writable root only when the MCP server needs filesystem credentials. Do not expose the full project `.env`.
 
-#### 2. Add Gmail MCP server to agent runner
+#### 2. Add Gmail MCP server to the Codex runtime
 
-Apply the changes described in `modify/container/agent-runner/src/index.ts.intent.md` to `container/agent-runner/src/index.ts`: add `gmail` MCP server (`npx -y @gongrzhe/server-gmail-autoauth-mcp`) and `'mcp__gmail__*'` to `allowedTools`.
+For local stdio MCP, add the `gmail` server to the `mcp_servers` config built in `container/agent-runner/src/runtime/codex-runtime.ts`. For HTTP/SSE MCP, prefer per-group `containerConfig.mcpServers`.
 
 #### 3. Record in state
 
@@ -69,8 +67,8 @@ This deterministically:
 - Adds `src/channels/gmail.ts` (GmailChannel class with self-registration via `registerChannel`)
 - Adds `src/channels/gmail.test.ts` (unit tests)
 - Appends `import './gmail.js'` to the channel barrel file `src/channels/index.ts`
-- Three-way merges Gmail credentials mount into `src/container-runner.ts` (~/.gmail-mcp -> /home/node/.gmail-mcp)
-- Three-way merges Gmail MCP server into `container/agent-runner/src/index.ts` (@gongrzhe/server-gmail-autoauth-mcp)
+- Ports Gmail credential access to the current local-worker runtime
+- Adds the Gmail MCP server to the Codex runtime config
 - Installs the `googleapis` npm dependency
 - Records the application in `.nanoclaw/state.yaml`
 
@@ -82,7 +80,7 @@ If the apply reports merge conflicts, read the intent files:
 
 #### Add email handling instructions
 
-Append the following to `groups/main/CLAUDE.md` (before the formatting section):
+Append the following to `groups/main/AGENTS.md`:
 
 ```markdown
 ## Email Notifications
@@ -149,19 +147,7 @@ If that fails (some versions don't have an auth subcommand), try `timeout 60 npx
 
 ### Build and restart
 
-Clear stale per-group agent-runner copies (they only get re-created if missing, so existing copies won't pick up the new Gmail server):
-
-```bash
-rm -r data/sessions/*/agent-runner-src 2>/dev/null || true
-```
-
-Rebuild the container (agent-runner changed):
-
-```bash
-cd container && ./build.sh
-```
-
-Then compile and restart:
+Compile and restart:
 
 ```bash
 npm run build
@@ -183,7 +169,7 @@ Tell the user:
 
 Tell the user to send themselves a test email. The agent should pick it up within a minute. Monitor: `tail -f logs/nanoclaw.log | grep -iE "(gmail|email)"`.
 
-Once verified, offer filter customization via `AskUserQuestion` — by default, only emails in the Primary inbox trigger the agent (Promotions, Social, Updates, and Forums are excluded). The user can keep this default or narrow further by sender, label, or keywords. No code changes needed for filters.
+Once verified, offer filter customization. By default, only unread Primary inbox emails trigger the agent (`is:unread category:primary`). The user can keep this default or narrow further by sender, label, or keywords.
 
 ### Check logs if needed
 
@@ -210,10 +196,10 @@ rm ~/.gmail-mcp/credentials.json
 npx -y @gongrzhe/server-gmail-autoauth-mcp
 ```
 
-### Container can't access Gmail
+### Worker can't access Gmail
 
-- Verify `~/.gmail-mcp` is mounted: check `src/container-runner.ts` for the `.gmail-mcp` mount
-- Check container logs: `cat groups/main/logs/container-*.log | tail -50`
+- Verify the Gmail MCP server can find `~/.gmail-mcp/credentials.json`
+- Check the newest worker log: `ls -lt groups/*/logs/worker-*.log | head`
 
 ### Emails not being detected (Channel mode only)
 
@@ -227,8 +213,7 @@ npx -y @gongrzhe/server-gmail-autoauth-mcp
 1. Remove `~/.gmail-mcp` mount from `src/container-runner.ts`
 2. Remove `gmail` MCP server and `mcp__gmail__*` from `container/agent-runner/src/index.ts`
 3. Remove `gmail` from `.nanoclaw/state.yaml`
-4. Clear stale agent-runner copies: `rm -r data/sessions/*/agent-runner-src 2>/dev/null || true`
-5. Rebuild: `cd container && ./build.sh && cd .. && npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux)
+4. Rebuild: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux)
 
 ### Channel mode
 
@@ -238,5 +223,4 @@ npx -y @gongrzhe/server-gmail-autoauth-mcp
 4. Remove `gmail` MCP server and `mcp__gmail__*` from `container/agent-runner/src/index.ts`
 5. Uninstall: `npm uninstall googleapis`
 6. Remove `gmail` from `.nanoclaw/state.yaml`
-7. Clear stale agent-runner copies: `rm -r data/sessions/*/agent-runner-src 2>/dev/null || true`
-8. Rebuild: `cd container && ./build.sh && cd .. && npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux)
+7. Rebuild: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux)

@@ -112,7 +112,7 @@ Bucket the upstream changed files:
 - **Build/config** (`package.json`, `package-lock.json`, `tsconfig*.json`, `container/agent-runner/`, `launchd/`): review needed
 - **Other**: docs, tests, misc
 
-Present these buckets to the user and ask them to choose one path using AskUserQuestion:
+Present these buckets to the user and ask them to choose one path:
 - A) **Full update**: merge all upstream changes
 - B) **Selective update**: cherry-pick specific upstream commits
 - C) **Abort**: they only wanted the preview
@@ -200,7 +200,7 @@ If one or more `[BREAKING]` lines are found:
 - Display a warning header to the user: "This update includes breaking changes that may require action:"
 - For each breaking change, display the full description.
 - Collect all skill names referenced in the breaking change entries (the `$<skill-name>` part).
-- Use AskUserQuestion to ask the user which migration skills they want to run now. Options:
+- Ask the user which migration skills they want to run now. Options:
   - One option per referenced skill (e.g., "Run $add-whatsapp to re-add WhatsApp channel")
   - "Skip — I'll handle these manually"
 - Set `multiSelect: true` so the user can pick multiple skills if there are several breaking changes.

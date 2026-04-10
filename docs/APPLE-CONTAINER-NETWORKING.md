@@ -1,5 +1,8 @@
 # Apple Container Networking Setup (macOS 26)
 
+> Historical note
+> NanoClaw's current default runtime is a local Codex worker and does not require Apple Container. This page is retained for people experimenting with the old container runtime skills or reading older deployment notes.
+
 Apple Container's vmnet networking requires manual configuration for containers to access the internet. Without this, containers can communicate with the host but cannot reach external services (DNS, HTTPS, APIs).
 
 ## Quick Setup

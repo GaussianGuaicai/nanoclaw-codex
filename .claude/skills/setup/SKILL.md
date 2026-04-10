@@ -9,13 +9,13 @@ Run setup steps automatically. Only pause when user action is required (channel 
 
 **Principle:** When something is broken or missing, fix it. Don't tell the user to go fix it themselves unless it genuinely requires their manual action (e.g. authenticating a channel, pasting a secret token). If a dependency is missing, install it. If a service won't start, diagnose and repair. Ask the user for permission when needed, then do the work.
 
-**UX Note:** Use `AskUserQuestion` for all user-facing questions.
+**UX Note:** Ask user-facing questions directly and keep them narrow. In Codex, repo skills are invoked with `$skill-name` (for example `$add-whatsapp`), even though some older notes may still show slash-prefixed names.
 
 ## 1. Bootstrap (Node.js + Dependencies)
 
 Run `bash setup.sh` and parse the status block.
 
-- If NODE_OK=false → Node.js is missing or too old. Use `AskUserQuestion: Would you like me to install Node.js 22?` If confirmed:
+- If NODE_OK=false → Node.js is missing or too old. Ask whether to install Node.js 22. If confirmed:
   - macOS: `brew install node@22` (if brew available) or install nvm then `nvm install 22`
   - Linux: `curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs`, or nvm
   - After installing Node, re-run `bash setup.sh`
@@ -46,13 +46,13 @@ Run `npx tsx setup/index.ts --step container` only if an older setup flow still 
 
 If HAS_ENV=true from step 2, read `.env` and check for `OPENAI_API_KEY`. If present, confirm with user: keep or reconfigure?
 
-AskUserQuestion: OpenAI API key configured already, or do you want to add/replace it?
+Ask whether the existing OpenAI API key should be kept or replaced.
 
 Tell user to add `OPENAI_API_KEY=<key>` to `.env`. Optionally add `OPENAI_BASE_URL` if they use a compatible proxy or self-hosted endpoint.
 
 ## 5. Set Up Channels
 
-AskUserQuestion (multiSelect): Which messaging channels do you want to enable?
+Ask which messaging channels to enable:
 - WhatsApp (authenticates via QR code or pairing code)
 - Telegram (authenticates via bot token from @BotFather)
 - Slack (authenticates via Slack app with Socket Mode)
@@ -62,10 +62,10 @@ AskUserQuestion (multiSelect): Which messaging channels do you want to enable?
 
 For each selected channel, invoke its skill:
 
-- **WhatsApp:** Invoke `/add-whatsapp`
-- **Telegram:** Invoke `/add-telegram`
-- **Slack:** Invoke `/add-slack`
-- **Discord:** Invoke `/add-discord`
+- **WhatsApp:** Invoke `$add-whatsapp`
+- **Telegram:** Invoke `$add-telegram`
+- **Slack:** Invoke `$add-slack`
+- **Discord:** Invoke `$add-discord`
 
 Each skill will:
 1. Install the channel code (via `apply-skill`)
@@ -78,7 +78,7 @@ Each skill will:
 
 ## 6. Mount Allowlist
 
-AskUserQuestion: Agent access to external directories?
+Ask whether the agent should have access to external directories.
 
 **No:** `npx tsx setup/index.ts --step mounts -- --empty`
 **Yes:** Collect paths/permissions. `npx tsx setup/index.ts --step mounts -- --json '{"allowedRoots":[...],"blockedPatterns":[],"nonMainReadOnly":true}'`
@@ -107,7 +107,7 @@ Run `npx tsx setup/index.ts --step verify` and parse the status block.
 - SERVICE=stopped → `npm run build`, then restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux) or `bash start-nanoclaw.sh` (WSL nohup)
 - SERVICE=not_found → re-run step 7
 - CREDENTIALS=missing → re-run step 4
-- CHANNEL_AUTH shows `not_found` for any channel → re-invoke that channel's skill (e.g. `/add-telegram`)
+- CHANNEL_AUTH shows `not_found` for any channel → re-invoke that channel's skill (e.g. `$add-telegram`)
 - REGISTERED_GROUPS=0 → re-invoke the channel skills from step 5
 - MOUNT_ALLOWLIST=missing → `npx tsx setup/index.ts --step mounts -- --empty`
 

@@ -1,11 +1,13 @@
 ---
 name: convert-to-apple-container
-description: Switch from Docker to Apple Container for macOS-native container isolation. Use when the user wants Apple Container instead of Docker, or is setting up on macOS and prefers the native runtime. Triggers on "apple container", "convert to apple container", "switch to apple container", or "use apple container".
+description: Historical migration skill for the old Docker/Apple Container runtime. Current NanoClaw uses a local Codex worker and does not require Apple Container.
 ---
 
 # Convert to Apple Container
 
 This skill switches NanoClaw's container runtime from Docker to Apple Container (macOS-only). It uses the skills engine for deterministic code changes, then walks through verification.
+
+> **Historical status:** The current default runtime no longer has `src/container-runtime.ts` or a container lifecycle path. Do not apply this skill to the current Codex-worker architecture unless you are deliberately reviving the old container runtime. For normal installs, Apple Container is not required.
 
 **What this changes:**
 - Container runtime binary: `docker` → `container`

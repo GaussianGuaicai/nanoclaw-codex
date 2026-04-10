@@ -12,12 +12,12 @@ const { readEnvFileMock, tempRoot, paths } = vi.hoisted(() => {
     paths: {
       agentConfigPath: `${configRoot}/agent-config.json`,
       contextConfigPath: `${configRoot}/context-config.json`,
-    websocketSourcesPath: `${configRoot}/websocket-sources.json`,
-    logsDir: `${tempRoot}/logs`,
-    storeDir: `${tempRoot}/store`,
-    dataDir: `${tempRoot}/data`,
-    groupsDir: `${tempRoot}/groups`,
-  },
+      websocketSourcesPath: `${configRoot}/websocket-sources.json`,
+      logsDir: `${tempRoot}/logs`,
+      storeDir: `${tempRoot}/store`,
+      dataDir: `${tempRoot}/data`,
+      groupsDir: `${tempRoot}/groups`,
+    },
   };
 });
 
@@ -475,11 +475,13 @@ describe('config mutations', () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(registeredGroups['slack:C123'].containerConfig?.agentConfig).toEqual({
-      defaults: {
-        model: 'gpt-5.4-mini',
+    expect(registeredGroups['slack:C123'].containerConfig?.agentConfig).toEqual(
+      {
+        defaults: {
+          model: 'gpt-5.4-mini',
+        },
       },
-    });
+    );
   });
 
   it('rejects websocket updates that remove required subscription fields', async () => {
@@ -560,7 +562,12 @@ describe('config mutations', () => {
 
   it('updates a group-owned websocket subscription for a target group', async () => {
     writeJson(
-      path.join(paths.groupsDir, 'other-group', 'config', 'websocket-sources.json'),
+      path.join(
+        paths.groupsDir,
+        'other-group',
+        'config',
+        'websocket-sources.json',
+      ),
       {
         subscriptions: [
           {
@@ -623,7 +630,12 @@ describe('config mutations', () => {
 
   it('allows a non-main group to update its own group-owned websocket subscription', async () => {
     writeJson(
-      path.join(paths.groupsDir, 'other-group', 'config', 'websocket-sources.json'),
+      path.join(
+        paths.groupsDir,
+        'other-group',
+        'config',
+        'websocket-sources.json',
+      ),
       {
         subscriptions: [
           {
@@ -673,7 +685,12 @@ describe('config mutations', () => {
 
   it('rejects non-main updates to another groups group-owned websocket subscription', async () => {
     writeJson(
-      path.join(paths.groupsDir, 'other-group', 'config', 'websocket-sources.json'),
+      path.join(
+        paths.groupsDir,
+        'other-group',
+        'config',
+        'websocket-sources.json',
+      ),
       {
         subscriptions: [
           {

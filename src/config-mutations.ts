@@ -272,7 +272,9 @@ function normalizeRequestTarget(
 
   const separatorIndex = request.target.indexOf(':');
   const domainScope =
-    separatorIndex >= 0 ? request.target.slice(0, separatorIndex) : request.target;
+    separatorIndex >= 0
+      ? request.target.slice(0, separatorIndex)
+      : request.target;
   const identifier =
     separatorIndex >= 0 ? request.target.slice(separatorIndex + 1) : undefined;
   const [domain, scope] = domainScope.split('/', 2);
@@ -382,7 +384,10 @@ function sanitizeConfigChangeLogEntry(
   entry: Record<string, unknown>,
 ): Record<string, unknown> {
   return Object.fromEntries(
-    Object.entries(entry).map(([key, value]) => [key, redactSensitiveValue(value)]),
+    Object.entries(entry).map(([key, value]) => [
+      key,
+      redactSensitiveValue(value),
+    ]),
   );
 }
 
@@ -569,9 +574,10 @@ function requireWebSocketSubscription(
     );
   }
 
-  const parsed = (options?.groupOwned
-    ? groupOwnedWebsocketSubscriptionSchema
-    : websocketSubscriptionBaseSchema
+  const parsed = (
+    options?.groupOwned
+      ? groupOwnedWebsocketSubscriptionSchema
+      : websocketSubscriptionBaseSchema
   ).safeParse(subscription);
   if (!parsed.success) {
     throw new Error(
@@ -586,7 +592,9 @@ function validateGroupOwnedWebSocketSubscription(
   value: Record<string, unknown>,
 ): Record<string, unknown> {
   if ('targetJid' in value) {
-    throw new Error('Group-owned websocket subscriptions must not include targetJid');
+    throw new Error(
+      'Group-owned websocket subscriptions must not include targetJid',
+    );
   }
   if ('taskInstructionsPath' in value) {
     throw new Error(
@@ -596,7 +604,9 @@ function validateGroupOwnedWebSocketSubscription(
 
   const parsed = groupOwnedWebsocketSubscriptionSchema.safeParse(value);
   if (!parsed.success) {
-    throw new Error(parsed.error.issues.map((issue) => issue.message).join('; '));
+    throw new Error(
+      parsed.error.issues.map((issue) => issue.message).join('; '),
+    );
   }
 
   return parsed.data;

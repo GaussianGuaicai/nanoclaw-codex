@@ -9,25 +9,29 @@ vi.mock('../../logger.js', () => ({
 }));
 
 vi.mock('./backends/local-macos.js', () => ({
-  LocalMacOSIMessageBackend: vi.fn().mockImplementation(() => ({
-    connect: vi.fn().mockResolvedValue(undefined),
-    disconnect: vi.fn().mockResolvedValue(undefined),
-    isConnected: vi.fn().mockReturnValue(true),
-    sendText: vi.fn().mockResolvedValue(undefined),
-    syncChats: vi.fn().mockResolvedValue(undefined),
-    startPolling: vi.fn().mockResolvedValue(undefined),
-  })),
+  LocalMacOSIMessageBackend: vi.fn().mockImplementation(function () {
+    return {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      isConnected: vi.fn().mockReturnValue(true),
+      sendText: vi.fn().mockResolvedValue(undefined),
+      syncChats: vi.fn().mockResolvedValue(undefined),
+      startPolling: vi.fn().mockResolvedValue(undefined),
+    };
+  }),
 }));
 
 vi.mock('./backends/bluebubbles.js', () => ({
-  BlueBubblesBackend: vi.fn().mockImplementation(() => ({
-    connect: vi.fn().mockResolvedValue(undefined),
-    disconnect: vi.fn().mockResolvedValue(undefined),
-    isConnected: vi.fn().mockReturnValue(false),
-    sendText: vi.fn().mockResolvedValue(undefined),
-    syncChats: vi.fn().mockResolvedValue(undefined),
-    startPolling: vi.fn().mockResolvedValue(undefined),
-  })),
+  BlueBubblesBackend: vi.fn().mockImplementation(function () {
+    return {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      isConnected: vi.fn().mockReturnValue(false),
+      sendText: vi.fn().mockResolvedValue(undefined),
+      syncChats: vi.fn().mockResolvedValue(undefined),
+      startPolling: vi.fn().mockResolvedValue(undefined),
+    };
+  }),
 }));
 
 import { IMessageChannel } from './channel.js';

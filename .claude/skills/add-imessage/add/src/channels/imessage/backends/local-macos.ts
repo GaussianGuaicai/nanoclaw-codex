@@ -13,7 +13,11 @@ import {
   loadIMessageCheckpoint,
   saveIMessageCheckpoint,
 } from '../local/checkpoint.js';
-import { readMessagesSince, readRecentChats } from '../local/chat-db.js';
+import {
+  readLatestMessageRowId,
+  readMessagesSince,
+  readRecentChats,
+} from '../local/chat-db.js';
 
 export class LocalMacOSIMessageBackend implements IMessageBackend {
   private connected = false;
@@ -34,6 +38,14 @@ export class LocalMacOSIMessageBackend implements IMessageBackend {
 
     if (!fs.existsSync(this.config.dbPath)) {
       throw new Error(`iMessage chat.db not found at ${this.config.dbPath}`);
+    }
+
+    // First boot should start from "now" to avoid importing entire history.
+    if (this.checkpoint.lastRowId === 0) {
+      const latestRowId = readLatestMessageRowId(this.config.dbPath);
+      if (latestRowId > 0) {
+        this.checkpoint = saveIMessageCheckpoint(latestRowId);
+      }
     }
 
     this.connected = true;
@@ -105,9 +117,12 @@ export class LocalMacOSIMessageBackend implements IMessageBackend {
       for (const entry of result.messages) {
         this.rememberMetadata(entry.metadata);
         this.callbacks.onChatMetadata(entry.metadata);
-        if (this.callbacks.isRegisteredJid(entry.jid)) {
+        if (
+          !entry.message.is_from_me &&
+          this.callbacks.isRegisteredJid(entry.metadata.jid)
+        ) {
           this.callbacks.onMessage({
-            jid: entry.jid,
+            jid: entry.metadata.jid,
             stableChatId: entry.stableChatId,
             message: entry.message,
             metadata: entry.metadata,

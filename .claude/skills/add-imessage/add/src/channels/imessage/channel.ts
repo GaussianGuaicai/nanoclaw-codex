@@ -41,7 +41,6 @@ export class IMessageChannel implements Channel {
         { error, backend: this.config.backend },
         'Failed to connect iMessage channel',
       );
-      throw error;
     }
   }
 

@@ -56,6 +56,20 @@ export interface MessageQueryResult {
   maxRowId: number;
 }
 
+export function readLatestMessageRowId(dbPath: string): number {
+  const db = openReadOnlyDatabase(dbPath);
+  try {
+    const row = db
+      .prepare('SELECT MAX(ROWID) AS maxRowId FROM message')
+      .get() as { maxRowId?: number | null } | undefined;
+    return Math.max(0, row?.maxRowId || 0);
+  } catch {
+    return 0;
+  } finally {
+    db.close();
+  }
+}
+
 export function readRecentChats(dbPath: string, limit = 50): ChatQueryResult {
   const db = openReadOnlyDatabase(dbPath);
   try {

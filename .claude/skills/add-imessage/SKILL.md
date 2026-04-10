@@ -113,8 +113,10 @@ mkdir -p data/env && cp .env data/env/env
 
 - If `IMESSAGE_ENABLED` is not `true`, the factory returns `null`
 - If the host platform is not macOS, the factory skips registration cleanly
-- If the backend is `bluebubbles`, the channel keeps the same public semantics but logs a clear **not implemented yet** message
+- If the backend is `bluebubbles`, startup skips the channel and logs a clear **not implemented yet** message
+- If `IMESSAGE_DB_PATH` is missing, startup skips the channel and logs a clear warning
 - Missing config must not crash the whole service; connection failures are logged clearly
+- On first boot with no checkpoint, the local backend seeds checkpoint to the latest message row to avoid historical backfill storms
 
 ## Validation after apply
 

@@ -36,6 +36,7 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 - The channel name is always `imessage`
 - Registered JIDs always start with `imessage:`
 - On startup, the local backend syncs recent chats as metadata
+- On first boot, checkpoint is seeded to the latest message row to avoid importing full history
 - Polling then imports new inbound text messages while persisting a checkpoint to NanoClaw's DB-backed router state
 
 ## If sending fails

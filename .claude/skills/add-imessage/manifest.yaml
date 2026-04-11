@@ -1,21 +1,10 @@
 skill: imessage
-version: 1.0.1
-description: 'Optional iMessage channel with backend abstraction and local macOS polling backend'
+version: 1.1.0
+description: 'Optional iMessage channel with single-file local-macos-first implementation'
 core_version: 0.1.0
 adds:
-  - src/channels/imessage/index.ts
-  - src/channels/imessage/channel.ts
-  - src/channels/imessage/backend.ts
-  - src/channels/imessage/backends/local-macos.ts
-  - src/channels/imessage/backends/bluebubbles.ts
-  - src/channels/imessage/local/chat-db.ts
-  - src/channels/imessage/local/applescript.ts
-  - src/channels/imessage/local/normalize.ts
-  - src/channels/imessage/local/checkpoint.ts
-  - src/channels/imessage/channel.test.ts
-  - src/channels/imessage/local/normalize.test.ts
-  - src/channels/imessage/local/checkpoint.test.ts
-  - src/channels/imessage/backends/local-macos.test.ts
+  - src/channels/imessage.ts
+  - src/channels/imessage.test.ts
 modifies:
   - src/channels/index.ts
 structured:
@@ -26,4 +15,4 @@ structured:
     - IMESSAGE_DB_PATH
 conflicts: []
 depends: []
-test: 'npx vitest run src/channels/imessage/channel.test.ts src/channels/imessage/local/normalize.test.ts src/channels/imessage/local/checkpoint.test.ts src/channels/imessage/backends/local-macos.test.ts'
+test: 'npx vitest run src/channels/imessage.test.ts'

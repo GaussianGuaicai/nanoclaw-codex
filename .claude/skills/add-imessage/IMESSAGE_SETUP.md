@@ -1,6 +1,7 @@
 # iMessage Setup for NanoClaw
 
 This optional skill currently supports only the **local macOS backend**.
+The installed channel implementation is a single file at `src/channels/imessage.ts`.
 
 ## Requirements
 

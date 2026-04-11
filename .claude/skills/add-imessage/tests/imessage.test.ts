@@ -15,21 +15,10 @@ describe('add-imessage skill package', () => {
     expect(content).toContain('IMESSAGE_BACKEND');
   });
 
-  it('includes the required channel/backend/local files', () => {
+  it('includes the required single-file channel implementation', () => {
     const requiredFiles = [
-      'add/src/channels/imessage/index.ts',
-      'add/src/channels/imessage/channel.ts',
-      'add/src/channels/imessage/backend.ts',
-      'add/src/channels/imessage/backends/local-macos.ts',
-      'add/src/channels/imessage/backends/bluebubbles.ts',
-      'add/src/channels/imessage/local/chat-db.ts',
-      'add/src/channels/imessage/local/applescript.ts',
-      'add/src/channels/imessage/local/normalize.ts',
-      'add/src/channels/imessage/local/checkpoint.ts',
-      'add/src/channels/imessage/channel.test.ts',
-      'add/src/channels/imessage/local/normalize.test.ts',
-      'add/src/channels/imessage/local/checkpoint.test.ts',
-      'add/src/channels/imessage/backends/local-macos.test.ts',
+      'add/src/channels/imessage.ts',
+      'add/src/channels/imessage.test.ts',
     ];
 
     for (const file of requiredFiles) {
@@ -38,16 +27,14 @@ describe('add-imessage skill package', () => {
   });
 
   it('uses sqlite-compatible participant aggregation SQL', () => {
-    const chatDbPath = path.join(
+    const channelPath = path.join(
       skillDir,
       'add',
       'src',
       'channels',
-      'imessage',
-      'local',
-      'chat-db.ts',
+      'imessage.ts',
     );
-    const content = fs.readFileSync(chatDbPath, 'utf-8');
+    const content = fs.readFileSync(channelPath, 'utf-8');
 
     expect(content).toContain(
       'REPLACE(GROUP_CONCAT(DISTINCT handle.id), \',\', char(31)) AS participants',
@@ -63,7 +50,7 @@ describe('add-imessage skill package', () => {
     );
   });
 
-  it('modifies the channel barrel by importing imessage/index.js', () => {
+  it('modifies the channel barrel by importing imessage.js', () => {
     const indexPath = path.join(
       skillDir,
       'modify',
@@ -73,7 +60,7 @@ describe('add-imessage skill package', () => {
     );
     const content = fs.readFileSync(indexPath, 'utf-8');
 
-    expect(content).toContain("import './imessage/index.js';");
+    expect(content).toContain("import './imessage.js';");
   });
 
   it('documents backend seam and macOS-only phase 1 support', () => {

@@ -6,7 +6,7 @@
 // gmail
 
 // imessage
-import './imessage/index.js';
+import './imessage.js';
 
 // slack
 import './slack.js';

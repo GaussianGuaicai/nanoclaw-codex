@@ -1,6 +1,6 @@
 ---
 name: add-imessage
-description: Add iMessage as an optional channel skill for NanoClaw using a backend abstraction. Phase 1 implements local macOS polling and leaves a BlueBubbles seam.
+description: Add iMessage as an optional channel skill for NanoClaw using a single-file local-macos-first implementation. Phase 1 keeps BlueBubbles as a config seam.
 ---
 
 # Add iMessage Channel
@@ -17,12 +17,10 @@ npx tsx scripts/apply-skill.ts .claude/skills/add-imessage
 
 will deterministically:
 
-- Add `src/channels/imessage/` with a standard `imessage` channel implementation
-- Add a backend interface plus two backends:
-  - `local-macos` (**implemented**)
-  - `bluebubbles` (**stub / seam only**)
-- Append `import './imessage/index.js';` to `src/channels/index.ts`
-- Add unit tests for the channel, normalization logic, checkpoint persistence, and the local backend
+- Add `src/channels/imessage.ts` with the complete `imessage` channel implementation
+- Default runtime path is `local-macos`; `bluebubbles` remains a config seam and logs not-implemented
+- Append `import './imessage.js';` to `src/channels/index.ts`
+- Add `src/channels/imessage.test.ts` for channel behavior and compatibility checks
 - Add these environment keys to `.env.example`:
   - `IMESSAGE_ENABLED`
   - `IMESSAGE_BACKEND`
@@ -36,19 +34,8 @@ If the apply reports merge conflicts, read:
 
 ## Files this skill adds when applied
 
-- `src/channels/imessage/index.ts`
-- `src/channels/imessage/channel.ts`
-- `src/channels/imessage/backend.ts`
-- `src/channels/imessage/backends/local-macos.ts`
-- `src/channels/imessage/backends/bluebubbles.ts`
-- `src/channels/imessage/local/chat-db.ts`
-- `src/channels/imessage/local/applescript.ts`
-- `src/channels/imessage/local/normalize.ts`
-- `src/channels/imessage/local/checkpoint.ts`
-- `src/channels/imessage/channel.test.ts`
-- `src/channels/imessage/local/normalize.test.ts`
-- `src/channels/imessage/local/checkpoint.test.ts`
-- `src/channels/imessage/backends/local-macos.test.ts`
+- `src/channels/imessage.ts`
+- `src/channels/imessage.test.ts`
 
 ## Design constraints this skill follows
 
@@ -151,7 +138,7 @@ Implementation reference:
 Run:
 
 ```bash
-npx vitest run src/channels/imessage/channel.test.ts src/channels/imessage/local/normalize.test.ts src/channels/imessage/local/checkpoint.test.ts src/channels/imessage/backends/local-macos.test.ts
+npx vitest run src/channels/imessage.test.ts
 npm run build
 ```
 
@@ -184,16 +171,9 @@ The exact stable ID comes from the normalization layer so that the outward JID s
 
 ## Future BlueBubbles integration seam
 
-When adding BlueBubbles later, implement the transport in:
-
-- `src/channels/imessage/backends/bluebubbles.ts`
-
-without changing:
-
-- `src/channels/imessage/channel.ts`
-- `src/channels/imessage/index.ts`
-- the `imessage:` JID contract
-- how the host stores registered groups and metadata
+When adding BlueBubbles later, implement transport behavior in the
+`IMESSAGE_BACKEND=bluebubbles` branch of `src/channels/imessage.ts` without
+changing the `imessage:` JID contract or host registration flow.
 
 ## Related docs
 

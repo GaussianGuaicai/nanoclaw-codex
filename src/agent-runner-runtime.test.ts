@@ -59,6 +59,11 @@ async function loadCodexRuntimeModule(): Promise<{
     hosts: string[] | undefined,
   ) => string | undefined;
   eventSummary: (event: any) => string[];
+  isSuccessfulSendMessageCall: (event: any) => boolean;
+  resolveFinalAutoDeliveryResult: (
+    finalText: string,
+    usedSendMessageTool: boolean,
+  ) => string | null;
 }> {
   const moduleUrl = pathToFileURL(
     path.join(
@@ -78,6 +83,11 @@ async function loadCodexRuntimeModule(): Promise<{
       hosts: string[] | undefined,
     ) => string | undefined;
     eventSummary: (event: any) => string[];
+    isSuccessfulSendMessageCall: (event: any) => boolean;
+    resolveFinalAutoDeliveryResult: (
+      finalText: string,
+      usedSendMessageTool: boolean,
+    ) => string | null;
   };
 }
 
@@ -150,6 +160,7 @@ describe('CodexRuntime IPC interruption', () => {
   it('interrupts the active turn when new IPC input arrives', async () => {
     const CodexRuntime = await loadCodexRuntime();
     const { thread } = createAbortableThread();
+    startThreadMock.mockReturnValue(thread);
     resumeThreadMock.mockReturnValue(thread);
 
     const onLog = vi.fn();
@@ -228,6 +239,60 @@ describe('CodexRuntime IPC interruption', () => {
       }),
     );
     expect(onResult).not.toHaveBeenCalled();
+  });
+
+  it('identifies successful nanoclaw/send_message tool calls', async () => {
+    const { isSuccessfulSendMessageCall } = await loadCodexRuntimeModule();
+
+    expect(
+      isSuccessfulSendMessageCall({
+        type: 'item.completed',
+        item: {
+          id: 'tool-1',
+          type: 'mcp_tool_call',
+          server: 'nanoclaw',
+          tool: 'send_message',
+          status: 'completed',
+          arguments: { text: 'hello' },
+          result: { content: [{ type: 'text', text: 'Message sent.' }] },
+        },
+      }),
+    ).toBe(true);
+    expect(
+      isSuccessfulSendMessageCall({
+        type: 'item.completed',
+        item: {
+          id: 'tool-2',
+          type: 'mcp_tool_call',
+          server: 'nanoclaw',
+          tool: 'send_message',
+          status: 'failed',
+          arguments: { text: 'hello' },
+          error: { message: 'boom' },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isSuccessfulSendMessageCall({
+        type: 'item.completed',
+        item: {
+          id: 'tool-3',
+          type: 'mcp_tool_call',
+          server: 'automation_server',
+          tool: 'send_message',
+          status: 'completed',
+          arguments: {},
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it('suppresses final auto-delivery result only when send_message was used', async () => {
+    const { resolveFinalAutoDeliveryResult } = await loadCodexRuntimeModule();
+
+    expect(resolveFinalAutoDeliveryResult('Message sent.', true)).toBeNull();
+    expect(resolveFinalAutoDeliveryResult('Task completed', false)).toBe('Task completed');
+    expect(resolveFinalAutoDeliveryResult('', false)).toBeNull();
   });
 
   it('formats command and MCP tool activity for worker logs', async () => {

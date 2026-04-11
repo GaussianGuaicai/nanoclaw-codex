@@ -36,6 +36,12 @@ export function formatOutbound(rawText: string): string {
   return text;
 }
 
+export function formatVisibleOutbound(rawText: string): string {
+  const text = formatOutbound(rawText).replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  return text;
+}
+
 export function routeOutbound(
   channels: Channel[],
   jid: string,

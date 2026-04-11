@@ -15,6 +15,7 @@ import {
   prepareContextSessionForTurn,
   recordCompletedContextTurn,
 } from './context-runtime.js';
+import { formatVisibleOutbound } from './router.js';
 import { GroupQueue } from './group-queue.js';
 import { loadWorkerAgentConfig } from './worker-config.js';
 import {
@@ -181,9 +182,10 @@ export async function runSingleTurnAgentTask(
     }
 
     if (output.result) {
-      result = output.result;
-      if (request.deliverOutput && deps.sendMessage) {
-        await deps.sendMessage(request.chatJid, output.result);
+      const visibleResult = formatVisibleOutbound(output.result);
+      result = visibleResult || result;
+      if (request.deliverOutput && deps.sendMessage && visibleResult) {
+        await deps.sendMessage(request.chatJid, visibleResult);
       }
       scheduleClose();
     }

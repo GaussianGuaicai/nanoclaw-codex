@@ -61,4 +61,6 @@ systemctl --user restart nanoclaw
 
 **WhatsApp not connecting after upgrade:** WhatsApp is now a separate skill, not bundled in core. Run `/add-whatsapp` (or `npx tsx scripts/apply-skill.ts .claude/skills/add-whatsapp && npm run build`) to install it. Existing auth credentials and groups are preserved.
 
+**iMessage local-macos backend fails with `SQLITE_CANTOPEN` or `authorization denied`:** macOS is blocking access to `~/Library/Messages/chat.db`. Grant Full Disk Access to the process that launches NanoClaw, then restart the service.
+
 **Context memory not updating:** Check `~/.config/nanoclaw/context-config.json`, then inspect `store/messages.db` tables `context_turns` and `group_memory_state`. Use `/context-memory` and [docs/CONTEXT_MEMORY.md](docs/CONTEXT_MEMORY.md) for the expected flow.

@@ -8,6 +8,17 @@ This optional skill currently supports only the **local macOS backend**.
 - The same macOS user account that runs NanoClaw must have access to `~/Library/Messages/chat.db`
 - Messages.app must be signed into iMessage
 - Automation permission may be required so `osascript` can tell Messages.app to send outgoing text
+- On modern macOS releases, the process that launches NanoClaw may need Full Disk Access to read `chat.db`; without it, startup can fail with `SQLITE_CANTOPEN` or `authorization denied`
+
+## "Auth complete" checklist
+
+Use this checklist to treat iMessage as fully authenticated (similar operational confidence to Slack):
+
+- `IMESSAGE_ENABLED=true` and `IMESSAGE_BACKEND=local-macos`
+- Messages.app signed in and able to send manually
+- Full Disk Access granted to the NanoClaw launcher process
+- AppleScript automation permission granted for Messages.app
+- target chat appears in synced metadata and is registered as `imessage:<stable-chat-id>`
 
 ## Recommended `.env`
 
@@ -28,6 +39,15 @@ npm run build
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 ```
 
+## Verify one-message-per-turn behavior
+
+After restart, send one inbound test message and verify:
+
+- exactly one outbound iMessage is produced
+- no trailing extra acknowledgement such as `Message sent`
+
+Background: runtime now suppresses final auto-delivery for turns that already used `nanoclaw/send_message`, preventing duplicate visible sends.
+
 ## What to expect
 
 - The channel name is always `imessage`
@@ -40,6 +60,7 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 
 Common causes:
 
+- Full Disk Access has not been granted for the NanoClaw launcher process
 - Messages.app is not signed in
 - AppleScript automation permission was denied
 - the target chat has not been discovered yet and cannot be resolved from the stable ID

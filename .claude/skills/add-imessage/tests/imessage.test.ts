@@ -37,6 +37,32 @@ describe('add-imessage skill package', () => {
     }
   });
 
+  it('uses sqlite-compatible participant aggregation SQL', () => {
+    const chatDbPath = path.join(
+      skillDir,
+      'add',
+      'src',
+      'channels',
+      'imessage',
+      'local',
+      'chat-db.ts',
+    );
+    const content = fs.readFileSync(chatDbPath, 'utf-8');
+
+    expect(content).toContain(
+      'REPLACE(GROUP_CONCAT(DISTINCT handle.id), \',\', char(31)) AS participants',
+    );
+    expect(content).toContain(
+      'REPLACE(GROUP_CONCAT(DISTINCT participant.id), \',\', char(31)) AS participants',
+    );
+    expect(content).not.toContain(
+      'GROUP_CONCAT(DISTINCT handle.id, char(31)) AS participants',
+    );
+    expect(content).not.toContain(
+      'GROUP_CONCAT(DISTINCT participant.id, char(31)) AS participants',
+    );
+  });
+
   it('modifies the channel barrel by importing imessage/index.js', () => {
     const indexPath = path.join(
       skillDir,

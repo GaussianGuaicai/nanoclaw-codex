@@ -91,6 +91,17 @@ This skill currently requires:
 - local access to the Messages SQLite database (default: `~/Library/Messages/chat.db`)
 - permission for `osascript` / AppleScript to control **Messages.app** for outbound sends
 - a signed-in iMessage account in Messages.app on the host Mac
+- Full Disk Access for the process that launches NanoClaw (required on many macOS versions to read `chat.db`)
+
+### Authentication parity checklist (match Slack's "fully connected" state)
+
+iMessage has no bot token flow, so "auth complete" means all local macOS permissions are complete:
+
+- Messages.app is signed in and can manually send to the target conversation
+- NanoClaw launcher process has Full Disk Access (or startup can fail with `SQLITE_CANTOPEN` / `authorization denied`)
+- AppleScript automation permission has been granted for controlling Messages.app
+- target conversation is discovered in metadata sync and registered with `imessage:<stable-chat-id>`
+- channel is enabled in runtime env (`IMESSAGE_ENABLED=true`, backend set to `local-macos`)
 
 ### Configuration
 
@@ -115,6 +126,25 @@ If you want iMessage enabled only for one group, prefer a group-scoped override 
 - If `IMESSAGE_DB_PATH` points to a missing file, startup skips the channel and logs a clear warning
 - Missing config must not crash the whole service; connection failures are logged clearly
 - On first boot with no checkpoint, the local backend seeds checkpoint to the latest message row to avoid historical backfill storms
+- Local chat DB queries use SQLite-compatible participant aggregation syntax across macOS SQLite variants
+
+### Duplicate "已回复。" hardening
+
+Older runtime builds could produce a duplicate visible follow-up in this pattern:
+
+1. agent calls `nanoclaw/send_message` (immediate user-visible send)
+2. same turn also emits a final assistant text
+3. host auto-delivers the final text, causing a second short message like `已回复。`
+
+Current fix is protocol-level (not phrase-based):
+
+- runtime detects successful `nanoclaw/send_message` tool calls from Codex stream events
+- when detected, final auto-delivery for that turn is suppressed
+- this avoids channel-specific hardcoding in iMessage prompts or output text filters
+
+Implementation reference:
+
+- `container/agent-runner/src/runtime/codex-runtime.ts`
 
 ## Validation after apply
 
@@ -124,6 +154,18 @@ Run:
 npx vitest run src/channels/imessage/channel.test.ts src/channels/imessage/local/normalize.test.ts src/channels/imessage/local/checkpoint.test.ts src/channels/imessage/backends/local-macos.test.ts
 npm run build
 ```
+
+Then restart and verify:
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+```
+
+For duplicate-send verification, send a test iMessage and confirm:
+
+- only one outbound iMessage is sent for one inbound trigger
+- worker log may include `mcp tool completed: nanoclaw/send_message`
+- no second user-visible auto-reply is emitted for the same turn
 
 ## Registration and JID format
 

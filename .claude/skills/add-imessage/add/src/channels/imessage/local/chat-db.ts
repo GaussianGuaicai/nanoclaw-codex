@@ -102,7 +102,7 @@ export function readRecentChats(dbPath: string, limit = 50): ChatQueryResult {
             chat.${displayNameColumn} AS displayName,
             MAX(message.${dateColumn}) AS lastMessageDate,
             MAX(message.${textColumn}) AS lastMessageText,
-            GROUP_CONCAT(DISTINCT handle.id, char(31)) AS participants
+            REPLACE(GROUP_CONCAT(DISTINCT handle.id), ',', char(31)) AS participants
           FROM chat
           LEFT JOIN chat_handle_join ON chat_handle_join.chat_id = chat.ROWID
           LEFT JOIN handle ON handle.ROWID = chat_handle_join.handle_id
@@ -196,7 +196,7 @@ export function readMessagesSince(
             chat.guid AS chatGuid,
             chat.${chatIdentifierColumn} AS chatIdentifier,
             chat.${displayNameColumn} AS displayName,
-            GROUP_CONCAT(DISTINCT participant.id, char(31)) AS participants
+            REPLACE(GROUP_CONCAT(DISTINCT participant.id), ',', char(31)) AS participants
           FROM message
           INNER JOIN chat_message_join ON chat_message_join.message_id = message.ROWID
           INNER JOIN chat ON chat.ROWID = chat_message_join.chat_id

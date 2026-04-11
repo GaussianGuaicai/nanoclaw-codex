@@ -1,5 +1,5 @@
 skill: imessage
-version: 1.0.0
+version: 1.0.1
 description: 'Optional iMessage channel with backend abstraction and local macOS polling backend'
 core_version: 0.1.0
 adds:

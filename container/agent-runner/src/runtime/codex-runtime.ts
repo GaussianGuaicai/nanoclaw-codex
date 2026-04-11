@@ -392,6 +392,25 @@ export function eventSummary(event: ThreadEvent): string[] {
   }
 }
 
+export function isSuccessfulSendMessageCall(event: ThreadEvent): boolean {
+  return (
+    event.type === 'item.completed' &&
+    event.item.type === 'mcp_tool_call' &&
+    event.item.server === 'nanoclaw' &&
+    event.item.tool === 'send_message' &&
+    event.item.status === 'completed' &&
+    !event.item.error
+  );
+}
+
+export function resolveFinalAutoDeliveryResult(
+  finalText: string,
+  usedSendMessageTool: boolean,
+): string | null {
+  if (usedSendMessageTool) return null;
+  return finalText || null;
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
@@ -559,6 +578,7 @@ export class CodexRuntime implements AgentRuntime {
     let finalText = '';
     let newSessionId = thread.id || sessionId || undefined;
     let usage: TurnUsage | undefined;
+    let usedSendMessageTool = false;
 
     pollTimer = setTimeout(pollIpcDuringQuery, this.ipc.ipcPollMs);
 
@@ -569,6 +589,13 @@ export class CodexRuntime implements AgentRuntime {
       for await (const event of streamed.events) {
         if (event.type === 'thread.started') {
           newSessionId = event.thread_id;
+        }
+
+        if (isSuccessfulSendMessageCall(event)) {
+          usedSendMessageTool = true;
+          this.hooks.onLog(
+            'Detected nanoclaw/send_message in turn; suppressing final auto-delivery',
+          );
         }
 
         if (
@@ -648,7 +675,11 @@ export class CodexRuntime implements AgentRuntime {
       );
     }
     if (input.backgroundOnly !== true) {
-      this.hooks.onResult(finalText || null, newSessionId || undefined, usage);
+      this.hooks.onResult(
+        resolveFinalAutoDeliveryResult(finalText, usedSendMessageTool),
+        newSessionId || undefined,
+        usage,
+      );
     }
 
     return {

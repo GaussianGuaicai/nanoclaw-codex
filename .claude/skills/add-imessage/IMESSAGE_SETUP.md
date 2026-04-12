@@ -28,6 +28,7 @@ IMESSAGE_ENABLED=true
 IMESSAGE_BACKEND=local-macos
 IMESSAGE_POLL_INTERVAL_MS=1500
 IMESSAGE_DB_PATH=~/Library/Messages/chat.db
+IMESSAGE_ALLOWED_CONTACTS=+15551234567,user@example.com
 ```
 
 The current local-worker runtime reads `.env` from the host directly; do not sync `.env` into `data/env/env`.
@@ -53,7 +54,8 @@ Background: runtime now suppresses final auto-delivery for turns that already us
 
 - The channel name is always `imessage`
 - Registered JIDs always start with `imessage:`
-- On startup, the local backend syncs recent chats as metadata
+- On startup, the local backend syncs metadata only for registered iMessage JIDs
+- Inbound processing is allowlist-first; unknown senders are ignored before metadata/message dispatch
 - On first boot, checkpoint is seeded to the latest message row to avoid importing full history
 - Polling then imports new inbound text messages while persisting a checkpoint to NanoClaw's DB-backed router state
 

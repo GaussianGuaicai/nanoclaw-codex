@@ -31,8 +31,14 @@ import fs from 'fs';
 import { readEnvFile } from '../env.js';
 import { getChannelFactory } from './registry.js';
 import {
+  extractTextFromAttributedBody,
   getIMessageConfig,
   IMessageChannel,
+  isAllowedContact,
+  isValidIMessageTarget,
+  parseAllowedContacts,
+  resolveMessageContent,
+  shouldDispatchInboundMessage,
   stableChatIdFromParts,
   targetFromChat,
 } from './imessage.js';
@@ -47,6 +53,7 @@ describe('iMessage single-file channel', () => {
     delete process.env.IMESSAGE_BACKEND;
     delete process.env.IMESSAGE_POLL_INTERVAL_MS;
     delete process.env.IMESSAGE_DB_PATH;
+    delete process.env.IMESSAGE_ALLOWED_CONTACTS;
   });
 
   it('defaults backend to local-macos and expands db path', () => {
@@ -55,6 +62,7 @@ describe('iMessage single-file channel', () => {
     expect(config.backend).toBe('local-macos');
     expect(config.pollIntervalMs).toBe(1500);
     expect(config.dbPath).toContain('/Library/Messages/chat.db');
+    expect(config.allowedContacts).toEqual([]);
   });
 
   it('accepts bluebubbles backend via env', () => {
@@ -62,6 +70,19 @@ describe('iMessage single-file channel', () => {
     process.env.IMESSAGE_BACKEND = 'bluebubbles';
     const config = getIMessageConfig();
     expect(config.backend).toBe('bluebubbles');
+  });
+
+  it('parses IMESSAGE_ALLOWED_CONTACTS with wildcard and normalization', () => {
+    process.env.IMESSAGE_ENABLED = 'true';
+    process.env.IMESSAGE_ALLOWED_CONTACTS =
+      ' +15551234567 , USER@Example.com , *, , mailto:foo@bar.com ';
+    const config = getIMessageConfig();
+    expect(config.allowedContacts).toEqual([
+      '+15551234567',
+      'user@example.com',
+      '*',
+      'foo@bar.com',
+    ]);
   });
 
   it('builds stable ids and targets compatibly', () => {
@@ -104,10 +125,82 @@ describe('iMessage single-file channel', () => {
         backend: 'local-macos',
         pollIntervalMs: 1500,
         dbPath: '/tmp/chat.db',
+        allowedContacts: [],
       },
     });
     expect(channel.ownsJid('imessage:dm:+15551234567')).toBe(true);
     expect(channel.ownsJid('slack:C1')).toBe(false);
+  });
+
+  it('parses allowlist values deterministically', () => {
+    expect(parseAllowedContacts(undefined)).toEqual([]);
+    expect(parseAllowedContacts('')).toEqual([]);
+    expect(parseAllowedContacts(' *, +15551234567,USER@EXAMPLE.COM, +15551234567 ')).toEqual([
+      '*',
+      '+15551234567',
+      'user@example.com',
+    ]);
+  });
+
+  it('matches contacts against allowlist semantics', () => {
+    expect(isAllowedContact(['*'], 'anyone')).toBe(true);
+    expect(
+      isAllowedContact(['+15551234567', 'user@example.com'], '+15551234567'),
+    ).toBe(true);
+    expect(
+      isAllowedContact(['+15551234567', 'user@example.com'], 'USER@EXAMPLE.COM'),
+    ).toBe(true);
+    expect(isAllowedContact(['+15551234567'], '+19999999999')).toBe(false);
+    expect(isAllowedContact([], '+15551234567')).toBe(false);
+  });
+
+  it('checks inbound dispatch order: deny by allowlist before registered lookup', () => {
+    const isRegisteredJid = vi.fn().mockReturnValue(true);
+    const denied = shouldDispatchInboundMessage({
+      isFromMe: false,
+      sender: '+19999999999',
+      jid: 'imessage:dm:+19999999999',
+      allowedContacts: ['+15551234567'],
+      isRegisteredJid,
+    });
+    expect(denied).toBe(false);
+    expect(isRegisteredJid).not.toHaveBeenCalled();
+
+    const allowedButUnregistered = shouldDispatchInboundMessage({
+      isFromMe: false,
+      sender: '+15551234567',
+      jid: 'imessage:dm:+15551234567',
+      allowedContacts: ['+15551234567'],
+      isRegisteredJid: () => false,
+    });
+    expect(allowedButUnregistered).toBe(false);
+
+    const fullyAllowed = shouldDispatchInboundMessage({
+      isFromMe: false,
+      sender: '+15551234567',
+      jid: 'imessage:dm:+15551234567',
+      allowedContacts: ['+15551234567'],
+      isRegisteredJid: () => true,
+    });
+    expect(fullyAllowed).toBe(true);
+  });
+
+  it('parses attributedBody fallback and keeps text precedence', () => {
+    const text = 'Hello from attributedBody';
+    const bytes = new TextEncoder().encode(text);
+    const blob = Uint8Array.from([0x01, 0x2b, bytes.length, ...bytes, 0x86, 0x84]);
+
+    expect(extractTextFromAttributedBody(blob)).toBe(text);
+    expect(resolveMessageContent(1, null, blob)).toBe(text);
+    expect(resolveMessageContent(1, 'Plain text wins', blob)).toBe('Plain text wins');
+    expect(resolveMessageContent(1, '', Uint8Array.from([0x01, 0x2b]))).toBe('');
+  });
+
+  it('validates outbound iMessage targets for handle mode safety', () => {
+    expect(isValidIMessageTarget('+15551234567')).toBe(true);
+    expect(isValidIMessageTarget('user@example.com')).toBe(true);
+    expect(isValidIMessageTarget('bad target')).toBe(false);
+    expect(isValidIMessageTarget('')).toBe(false);
   });
 
   it('factory skips bluebubbles backend cleanly', () => {

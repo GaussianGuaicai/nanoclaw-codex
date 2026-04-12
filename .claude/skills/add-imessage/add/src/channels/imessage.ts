@@ -24,6 +24,7 @@ export interface IMessageConfig {
   backend: IMessageBackendName;
   pollIntervalMs: number;
   dbPath: string;
+  allowedContacts: string[];
 }
 
 export interface IMessageChatTarget {
@@ -81,6 +82,7 @@ interface RawIMessageMessageRecord {
   rowId: number;
   guid?: string | null;
   text?: string | null;
+  attributedBody?: Buffer | Uint8Array | null;
   isFromMe: boolean;
   date?: number | string | null;
   handleId?: string | null;
@@ -123,6 +125,7 @@ export function getIMessageConfig(): IMessageConfig {
     'IMESSAGE_BACKEND',
     'IMESSAGE_POLL_INTERVAL_MS',
     'IMESSAGE_DB_PATH',
+    'IMESSAGE_ALLOWED_CONTACTS',
   ]);
 
   const enabledRaw = process.env.IMESSAGE_ENABLED ?? env.IMESSAGE_ENABLED;
@@ -130,6 +133,8 @@ export function getIMessageConfig(): IMessageConfig {
   const pollRaw =
     process.env.IMESSAGE_POLL_INTERVAL_MS ?? env.IMESSAGE_POLL_INTERVAL_MS;
   const dbPathRaw = process.env.IMESSAGE_DB_PATH ?? env.IMESSAGE_DB_PATH;
+  const allowedContactsRaw =
+    process.env.IMESSAGE_ALLOWED_CONTACTS ?? env.IMESSAGE_ALLOWED_CONTACTS;
 
   const backend: IMessageBackendName =
     backendRaw === 'bluebubbles' ? 'bluebubbles' : 'local-macos';
@@ -139,6 +144,7 @@ export function getIMessageConfig(): IMessageConfig {
     backend,
     pollIntervalMs: Math.max(250, parseInt(pollRaw || '1500', 10) || 1500),
     dbPath: expandHome(dbPathRaw || '~/Library/Messages/chat.db'),
+    allowedContacts: parseAllowedContacts(allowedContactsRaw),
   };
 }
 
@@ -152,6 +158,41 @@ function cleanAddress(value?: string | null): string {
     .replace(/^mailto:/i, '')
     .replace(/\s+/g, '')
     .toLowerCase();
+}
+
+export function parseAllowedContacts(raw?: string): string[] {
+  if (!raw?.trim()) return [];
+  const normalized = raw
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => (item === '*' ? '*' : cleanAddress(item)))
+    .filter(Boolean);
+  return Array.from(new Set(normalized));
+}
+
+export function isAllowedContact(
+  allowedContacts: readonly string[],
+  sender: string,
+): boolean {
+  if (allowedContacts.includes('*')) return true;
+  const normalizedSender = cleanAddress(sender);
+  if (!normalizedSender) return false;
+  return allowedContacts.some(
+    (allowed) => allowed !== '*' && cleanAddress(allowed) === normalizedSender,
+  );
+}
+
+export function shouldDispatchInboundMessage(input: {
+  isFromMe: boolean;
+  sender: string;
+  jid: string;
+  allowedContacts: readonly string[];
+  isRegisteredJid: (jid: string) => boolean;
+}): boolean {
+  if (input.isFromMe) return false;
+  if (!isAllowedContact(input.allowedContacts, input.sender)) return false;
+  return input.isRegisteredJid(input.jid);
 }
 
 function stripServicePrefix(guid?: string): string {
@@ -270,7 +311,11 @@ function normalizeChatRecord(record: RawIMessageChatRecord): IMessageChatMetadat
 function normalizeMessageRecord(
   record: RawIMessageMessageRecord,
 ): NormalizedMessageRecord | null {
-  const content = (record.text || '').trim();
+  const content = resolveMessageContent(
+    record.rowId,
+    record.text,
+    record.attributedBody,
+  );
   if (!content) return null;
 
   const metadata = normalizeChatRecord({
@@ -332,7 +377,30 @@ function escapeAppleScriptString(value: string): string {
   return value
     .replace(/\\/g, '\\\\')
     .replace(/"/g, '\\"')
-    .replace(/\n/g, '\\n');
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r');
+}
+
+export function isValidIMessageTarget(value: string): boolean {
+  const target = value.trim();
+  if (!target) return false;
+
+  if (target.startsWith('+')) {
+    const digitsOnly = target.split('').filter((ch) => /\d/.test(ch)).join('');
+    return digitsOnly.length >= 7 && digitsOnly.length <= 15;
+  }
+
+  const atPos = target.indexOf('@');
+  if (atPos <= 0 || atPos === target.length - 1) return false;
+  const local = target.slice(0, atPos);
+  const domain = target.slice(atPos + 1);
+  const localValid = local
+    .split('')
+    .every((ch) => /[A-Za-z0-9._+-]/.test(ch));
+  const domainValid =
+    domain.includes('.') && domain.split('').every((ch) => /[A-Za-z0-9.-]/.test(ch));
+
+  return localValid && domainValid;
 }
 
 function scriptForTarget(target: IMessageChatTarget, text: string): string {
@@ -361,7 +429,73 @@ async function sendTextViaAppleScript(
   target: IMessageChatTarget,
   text: string,
 ): Promise<void> {
+  if (target.kind === 'handle' && !isValidIMessageTarget(target.value)) {
+    throw new Error(
+      `Invalid iMessage target: ${target.value}. Expected E.164 phone or email`,
+    );
+  }
+  if (target.kind === 'chat-guid' && !target.value.trim()) {
+    throw new Error('Invalid iMessage chat-guid target');
+  }
   await execFileAsync('osascript', ['-e', scriptForTarget(target, text)]);
+}
+
+export function extractTextFromAttributedBody(
+  body: Uint8Array | Buffer,
+): string | undefined {
+  if (!body || body.length < 3) return undefined;
+  const markerPos = (() => {
+    for (let i = 0; i < body.length - 1; i += 1) {
+      if (body[i] === 0x01 && body[i + 1] === 0x2b) return i;
+    }
+    return -1;
+  })();
+  if (markerPos < 0) return undefined;
+
+  const rest = body.subarray(markerPos + 2);
+  if (!rest.length) return undefined;
+
+  let length = 0;
+  let start = 0;
+  const first = rest[0];
+  if (first <= 0x7f) {
+    length = first;
+    start = 1;
+  } else if (first === 0x81 && rest.length >= 3) {
+    length = rest[1] | (rest[2] << 8);
+    start = 3;
+  } else if (first === 0x82 && rest.length >= 5) {
+    length = rest[1] | (rest[2] << 8) | (rest[3] << 16) | (rest[4] << 24);
+    start = 5;
+  } else {
+    return undefined;
+  }
+
+  const end = start + length;
+  if (length < 0 || end > rest.length) return undefined;
+  const bytes = rest.subarray(start, end);
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return undefined;
+  }
+}
+
+export function resolveMessageContent(
+  rowId: number,
+  text?: string | null,
+  attributedBody?: Uint8Array | Buffer | null,
+): string {
+  const content = (text || '').trim();
+  if (content) return content;
+
+  const parsed = attributedBody
+    ? (extractTextFromAttributedBody(attributedBody) || '').trim()
+    : '';
+  if (!parsed && attributedBody && attributedBody.length > 0) {
+    logger.warn({ rowId }, 'Failed to parse iMessage attributedBody');
+  }
+  return parsed;
 }
 
 function openReadOnlyDatabase(dbPath: string): Database.Database {
@@ -490,6 +624,12 @@ function readMessagesSince(
     const fromMeColumn = pickFirst(messageColumns, ['is_from_me'], 'is_from_me');
     const dateColumn = pickFirst(messageColumns, ['date', 'date_delivered'], 'date');
     const handleColumn = pickFirst(messageColumns, ['handle_id'], 'handle_id');
+    const attributedBodyColumn = pickFirst(
+      messageColumns,
+      ['attributedBody', 'attributed_body'],
+      '',
+    );
+    const hasAttributedBodyColumn = messageColumns.has(attributedBodyColumn);
     const chatIdentifierColumn = pickFirst(
       chatColumns,
       ['chat_identifier', 'guid'],
@@ -504,6 +644,11 @@ function readMessagesSince(
             message.ROWID AS rowId,
             message.guid AS guid,
             message.${textColumn} AS text,
+            ${
+              hasAttributedBodyColumn
+                ? `message.${attributedBodyColumn} AS attributedBody,`
+                : 'NULL AS attributedBody,'
+            }
             message.${fromMeColumn} AS isFromMe,
             message.${dateColumn} AS date,
             handle.id AS handleId,
@@ -518,6 +663,14 @@ function readMessagesSince(
           LEFT JOIN chat_handle_join ON chat_handle_join.chat_id = chat.ROWID
           LEFT JOIN handle AS participant ON participant.ROWID = chat_handle_join.handle_id
           WHERE message.ROWID > ?
+            AND (
+              message.${textColumn} IS NOT NULL
+              ${
+                hasAttributedBodyColumn
+                  ? `OR message.${attributedBodyColumn} IS NOT NULL`
+                  : ''
+              }
+            )
           GROUP BY message.ROWID
           ORDER BY message.ROWID ASC
           LIMIT ?
@@ -527,6 +680,7 @@ function readMessagesSince(
       rowId: number;
       guid?: string | null;
       text?: string | null;
+      attributedBody?: Buffer | Uint8Array | null;
       isFromMe: number;
       date?: number | string | null;
       handleId?: string | null;
@@ -542,6 +696,7 @@ function readMessagesSince(
           rowId: row.rowId,
           guid: row.guid,
           text: row.text,
+          attributedBody: row.attributedBody,
           isFromMe: !!row.isFromMe,
           date: row.date,
           handleId: row.handleId,
@@ -643,6 +798,7 @@ class LocalMacOSIMessageBackend implements IMessageBackend {
 
     try {
       for (const metadata of readRecentChats(this.config.dbPath, 50)) {
+        if (!this.callbacks.isRegisteredJid(metadata.jid)) continue;
         this.chatTargets.set(metadata.stableChatId, metadata.target);
         this.callbacks.onChatMetadata(metadata);
       }
@@ -670,18 +826,22 @@ class LocalMacOSIMessageBackend implements IMessageBackend {
 
       for (const entry of result.messages) {
         this.chatTargets.set(entry.stableChatId, entry.metadata.target);
+        const shouldDispatch = shouldDispatchInboundMessage({
+          isFromMe: !!entry.message.is_from_me,
+          sender: entry.message.sender,
+          jid: entry.metadata.jid,
+          allowedContacts: this.config.allowedContacts,
+          isRegisteredJid: (jid) => this.callbacks.isRegisteredJid(jid),
+        });
+        if (!shouldDispatch) continue;
+
         this.callbacks.onChatMetadata(entry.metadata);
-        if (
-          !entry.message.is_from_me &&
-          this.callbacks.isRegisteredJid(entry.metadata.jid)
-        ) {
-          this.callbacks.onMessage({
-            jid: entry.metadata.jid,
-            stableChatId: entry.stableChatId,
-            message: entry.message,
-            metadata: entry.metadata,
-          });
-        }
+        this.callbacks.onMessage({
+          jid: entry.metadata.jid,
+          stableChatId: entry.stableChatId,
+          message: entry.message,
+          metadata: entry.metadata,
+        });
       }
 
       if (result.maxRowId > this.checkpoint.lastRowId) {

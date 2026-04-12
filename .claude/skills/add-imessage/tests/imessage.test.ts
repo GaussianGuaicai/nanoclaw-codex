@@ -13,6 +13,7 @@ describe('add-imessage skill package', () => {
     expect(content).toContain('skill: imessage');
     expect(content).toContain('IMESSAGE_ENABLED');
     expect(content).toContain('IMESSAGE_BACKEND');
+    expect(content).toContain('IMESSAGE_ALLOWED_CONTACTS');
   });
 
   it('includes the required single-file channel implementation', () => {

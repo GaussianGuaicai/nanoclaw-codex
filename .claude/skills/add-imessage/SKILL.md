@@ -99,6 +99,7 @@ IMESSAGE_ENABLED=true
 IMESSAGE_BACKEND=local-macos
 IMESSAGE_POLL_INTERVAL_MS=1500
 IMESSAGE_DB_PATH=~/Library/Messages/chat.db
+IMESSAGE_ALLOWED_CONTACTS=+15551234567,user@example.com
 ```
 
 The current local-worker runtime reads `.env` from the host directly; there is no `data/env/env` sync step.
@@ -111,8 +112,14 @@ If you want iMessage enabled only for one group, prefer a group-scoped override 
 - If the backend is `bluebubbles`, startup skips the channel and logs a clear **not implemented yet** message
 - If `IMESSAGE_DB_PATH` is missing, startup skips the channel and logs a clear warning
 - If `IMESSAGE_DB_PATH` points to a missing file, startup skips the channel and logs a clear warning
+- `IMESSAGE_ALLOWED_CONTACTS` controls inbound allowlist semantics:
+  - empty = deny all inbound
+  - `*` = allow all inbound (temporary verification only)
+  - explicit list = only matched sender values are processed
 - Missing config must not crash the whole service; connection failures are logged clearly
 - On first boot with no checkpoint, the local backend seeds checkpoint to the latest message row to avoid historical backfill storms
+- iMessage inbound filtering order is `allowlist -> registered jid -> metadata/message dispatch`
+- chat metadata sync is scoped to registered iMessage JIDs to avoid unknown JID growth
 - Local chat DB queries use SQLite-compatible participant aggregation syntax across macOS SQLite variants
 
 ### Duplicate "已回复。" hardening

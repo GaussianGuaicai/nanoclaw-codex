@@ -1,5 +1,5 @@
 skill: imessage
-version: 1.1.0
+version: 1.1.1
 description: 'Optional iMessage channel with single-file local-macos-first implementation'
 core_version: 0.1.0
 adds:
@@ -13,6 +13,7 @@ structured:
     - IMESSAGE_BACKEND
     - IMESSAGE_POLL_INTERVAL_MS
     - IMESSAGE_DB_PATH
+    - IMESSAGE_ALLOWED_CONTACTS
 conflicts: []
 depends: []
 test: 'npx vitest run src/channels/imessage.test.ts'

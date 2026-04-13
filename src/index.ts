@@ -325,54 +325,52 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
-  if (finalResponse) {
-    const participation = isContextSourceEnabled({
-      source: 'chat',
+  const participation = isContextSourceEnabled({
+    source: 'chat',
+    groupFolder: group.folder,
+  });
+  if (participation.enabled) {
+    const sessionKey = buildLiveSessionKey({
       groupFolder: group.folder,
+      source: 'chat',
+      contextMode: 'group',
     });
-    if (participation.enabled) {
-      const sessionKey = buildLiveSessionKey({
-        groupFolder: group.folder,
-        source: 'chat',
-        contextMode: 'group',
-      });
-      await recordCompletedContextTurn({
-        group,
-        chatJid,
-        source: 'chat',
-        contextMode: 'group',
-        sessionKey,
-        userPrompt: contextUserPrompt,
-        assistantResponse: finalResponse,
-        usage: latestUsage ?? output.usage,
-        closeWorker: () => queue.closeStdin(chatJid),
-        clearSessionCache: () => {
-          if (sessionKey) {
-            delete sessions[sessionKey];
-          }
-        },
-        invokeInternalPrompt: async (internalPrompt) =>
-          runContainerAgent(
-            group,
-            {
-              prompt: internalPrompt,
-              groupFolder: group.folder,
-              chatJid,
-              isMain: group.isMain === true,
-              taskSource: 'chat',
-              maintenancePurpose: 'summary-memory',
-              suppressConversationArchive: true,
-              agentConfig: {
-                model: participation.config.summaryMemory.model,
-                reasoningEffort:
-                  participation.config.summaryMemory.reasoningEffort,
-              },
+    await recordCompletedContextTurn({
+      group,
+      chatJid,
+      source: 'chat',
+      contextMode: 'group',
+      sessionKey,
+      userPrompt: contextUserPrompt,
+      assistantResponse: finalResponse,
+      usage: latestUsage ?? output.usage,
+      closeWorker: () => queue.closeStdin(chatJid),
+      clearSessionCache: () => {
+        if (sessionKey) {
+          delete sessions[sessionKey];
+        }
+      },
+      invokeInternalPrompt: async (internalPrompt) =>
+        runContainerAgent(
+          group,
+          {
+            prompt: internalPrompt,
+            groupFolder: group.folder,
+            chatJid,
+            isMain: group.isMain === true,
+            taskSource: 'chat',
+            maintenancePurpose: 'summary-memory',
+            suppressConversationArchive: true,
+            agentConfig: {
+              model: participation.config.summaryMemory.model,
+              reasoningEffort:
+                participation.config.summaryMemory.reasoningEffort,
             },
-            (proc, executionName) =>
-              queue.registerProcess(chatJid, proc, executionName, group.folder),
-          ),
-      });
-    }
+          },
+          (proc, executionName) =>
+            queue.registerProcess(chatJid, proc, executionName, group.folder),
+        ),
+    });
   }
 
   return true;

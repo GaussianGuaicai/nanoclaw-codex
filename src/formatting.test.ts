@@ -218,9 +218,9 @@ describe('formatVisibleOutbound', () => {
   });
 
   it('strips internal tags before evaluating visibility', () => {
-    expect(formatVisibleOutbound('<internal>hidden</internal>message sent')).toBe(
-      'message sent',
-    );
+    expect(
+      formatVisibleOutbound('<internal>hidden</internal>message sent'),
+    ).toBe('message sent');
   });
 
   it('normalizes whitespace in visible text', () => {

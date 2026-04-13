@@ -291,7 +291,9 @@ describe('CodexRuntime IPC interruption', () => {
     const { resolveFinalAutoDeliveryResult } = await loadCodexRuntimeModule();
 
     expect(resolveFinalAutoDeliveryResult('Message sent.', true)).toBeNull();
-    expect(resolveFinalAutoDeliveryResult('Task completed', false)).toBe('Task completed');
+    expect(resolveFinalAutoDeliveryResult('Task completed', false)).toBe(
+      'Task completed',
+    );
     expect(resolveFinalAutoDeliveryResult('', false)).toBeNull();
   });
 

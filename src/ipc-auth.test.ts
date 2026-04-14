@@ -1,14 +1,17 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
 import {
+  _getStoredMessageForTest,
   _initTestDatabase,
   createTask,
+  getAllChats,
   getAllTasks,
+  getMessagesSince,
   getRegisteredGroup,
   getTaskById,
   setRegisteredGroup,
 } from './db.js';
-import { processTaskIpc, IpcDeps } from './ipc.js';
+import { IpcDeps, persistIpcSentMessage, processTaskIpc } from './ipc.js';
 import { RegisteredGroup } from './types.js';
 
 // Set up registered groups used across tests
@@ -571,6 +574,38 @@ describe('IPC message authorization', () => {
     expect(
       isMessageAuthorized('whatsapp_main', true, 'unknown@g.us', groups),
     ).toBe(true);
+  });
+});
+
+describe('persistIpcSentMessage', () => {
+  it('stores outbound IPC messages as bot messages and keeps them out of new-message polling', () => {
+    const timestamp = '2026-04-14T07:38:22.000Z';
+    const messageId = 'ipc:other-group:test-message.json';
+
+    persistIpcSentMessage({
+      chatJid: 'other@g.us',
+      text: 'scheduled reply',
+      sourceGroup: 'other-group',
+      messageId,
+      targetGroupName: 'Other',
+      timestamp,
+    });
+
+    const stored = _getStoredMessageForTest(messageId, 'other@g.us');
+    expect(stored).not.toBeNull();
+    expect(stored?.is_from_me).toBe(1);
+    expect(stored?.is_bot_message).toBe(1);
+    expect(stored?.content).toBe('scheduled reply');
+
+    const visible = getMessagesSince('other@g.us', '', 'Andy');
+    expect(visible).toHaveLength(0);
+
+    const chat = getAllChats().find((entry) => entry.jid === 'other@g.us');
+    expect(chat).toMatchObject({
+      jid: 'other@g.us',
+      name: 'Other',
+      last_message_time: timestamp,
+    });
   });
 });
 

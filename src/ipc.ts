@@ -6,9 +6,21 @@ import { CronExpressionParser } from 'cron-parser';
 
 import { applyConfigUpdate, inspectConfigUpdate } from './config-mutations.js';
 import { agentExecutionConfigSchema } from './agent-config.js';
-import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import {
+  ASSISTANT_NAME,
+  DATA_DIR,
+  IPC_POLL_INTERVAL,
+  TIMEZONE,
+} from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  createTask,
+  deleteTask,
+  getTaskById,
+  storeChatMetadata,
+  storeMessageDirect,
+  updateTask,
+} from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -70,6 +82,49 @@ function cleanupExpiredConfigPreviews(now = Date.now()): void {
   }
 }
 
+interface IpcMessagePayload {
+  type: 'message';
+  chatJid: string;
+  text: string;
+}
+
+function isIpcMessagePayload(value: unknown): value is IpcMessagePayload {
+  if (!value || typeof value !== 'object') return false;
+  const message = value as Record<string, unknown>;
+  return (
+    message.type === 'message' &&
+    typeof message.chatJid === 'string' &&
+    message.chatJid.trim().length > 0 &&
+    typeof message.text === 'string' &&
+    message.text.trim().length > 0
+  );
+}
+
+export function persistIpcSentMessage(params: {
+  chatJid: string;
+  text: string;
+  sourceGroup: string;
+  messageId?: string;
+  targetGroupName?: string;
+  timestamp?: string;
+}): void {
+  const timestamp = params.timestamp ?? new Date().toISOString();
+  const messageId =
+    params.messageId ?? `ipc:${params.sourceGroup}:${crypto.randomUUID()}`;
+
+  storeChatMetadata(params.chatJid, timestamp, params.targetGroupName);
+  storeMessageDirect({
+    id: messageId,
+    chat_jid: params.chatJid,
+    sender: ASSISTANT_NAME,
+    sender_name: ASSISTANT_NAME,
+    content: params.text,
+    timestamp,
+    is_from_me: true,
+    is_bot_message: true,
+  });
+}
+
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
     logger.debug('IPC watcher already running, skipping duplicate start');
@@ -117,7 +172,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(messagesDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              if (data.type === 'message' && data.chatJid && data.text) {
+              if (isIpcMessagePayload(data)) {
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
                 if (
@@ -125,6 +180,13 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
                   await deps.sendMessage(data.chatJid, data.text);
+                  persistIpcSentMessage({
+                    chatJid: data.chatJid,
+                    text: data.text,
+                    sourceGroup,
+                    messageId: `ipc:${sourceGroup}:${file}`,
+                    targetGroupName: targetGroup?.name,
+                  });
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',

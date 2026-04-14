@@ -231,6 +231,44 @@ export function _initTestDatabase(): void {
   createSchema(db);
 }
 
+/** @internal - for tests only. Reads a raw message row including bot flags. */
+export function _getStoredMessageForTest(
+  id: string,
+  chatJid: string,
+): {
+  id: string;
+  chat_jid: string;
+  sender: string;
+  sender_name: string;
+  content: string;
+  timestamp: string;
+  is_from_me: number;
+  is_bot_message: number;
+} | null {
+  return (
+    (db
+      .prepare(
+        `
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message
+      FROM messages
+      WHERE id = ? AND chat_jid = ?
+    `,
+      )
+      .get(id, chatJid) as
+      | {
+          id: string;
+          chat_jid: string;
+          sender: string;
+          sender_name: string;
+          content: string;
+          timestamp: string;
+          is_from_me: number;
+          is_bot_message: number;
+        }
+      | undefined) ?? null
+  );
+}
+
 /**
  * Store chat metadata only (no message content).
  * Used for all chats to enable group discovery without storing sensitive content.

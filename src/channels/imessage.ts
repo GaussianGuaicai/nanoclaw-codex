@@ -763,12 +763,13 @@ class BlueBubblesBackend implements IMessageBackend {
   async syncChats(_force: boolean): Promise<void> {}
 }
 
-class LocalMacOSIMessageBackend implements IMessageBackend {
+export class LocalMacOSIMessageBackend implements IMessageBackend {
   private connected = false;
   private pollTimer: NodeJS.Timeout | undefined;
   private checkpoint = loadIMessageCheckpoint();
   private lastSyncAt = 0;
   private chatTargets = new Map<string, IMessageChatTarget>();
+  private polling = false;
 
   constructor(
     private readonly config: IMessageConfig,
@@ -845,7 +846,8 @@ class LocalMacOSIMessageBackend implements IMessageBackend {
   }
 
   private async pollOnce(): Promise<void> {
-    if (!this.connected) return;
+    if (!this.connected || this.polling) return;
+    this.polling = true;
     try {
       const result = readMessagesSince(
         this.config.dbPath,
@@ -878,6 +880,8 @@ class LocalMacOSIMessageBackend implements IMessageBackend {
       }
     } catch (error) {
       logger.error({ error }, 'Failed to poll local macOS iMessage backend');
+    } finally {
+      this.polling = false;
     }
   }
 

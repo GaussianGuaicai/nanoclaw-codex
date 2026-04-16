@@ -26,6 +26,40 @@ vi.mock('../logger.js', () => ({
   },
 }));
 
+let messageRows: Array<Record<string, unknown>> = [];
+const fakeDb = {
+  prepare: vi.fn((sql: string) => ({
+    all: vi.fn(() => {
+      if (sql.includes('PRAGMA table_info(message)')) {
+        return [
+          { name: 'text' },
+          { name: 'is_from_me' },
+          { name: 'date' },
+          { name: 'handle_id' },
+          { name: 'attributedBody' },
+        ];
+      }
+      if (sql.includes('PRAGMA table_info(chat)')) {
+        return [{ name: 'chat_identifier' }, { name: 'display_name' }];
+      }
+      if (sql.includes('FROM message')) return messageRows;
+      return [];
+    }),
+    get: vi.fn(() => {
+      if (sql.includes('sqlite_master')) return { name: 'chat_message_join' };
+      if (sql.includes('MAX(ROWID)')) return { maxRowId: 0 };
+      return undefined;
+    }),
+  })),
+  close: vi.fn(),
+};
+
+vi.mock('better-sqlite3', () => ({
+  default: vi.fn(function Database() {
+    return fakeDb;
+  }),
+}));
+
 import fs from 'fs';
 
 import { readEnvFile } from '../env.js';
@@ -34,6 +68,7 @@ import {
   extractTextFromAttributedBody,
   getIMessageConfig,
   IMessageChannel,
+  LocalMacOSIMessageBackend,
   isAllowedContact,
   isValidIMessageTarget,
   parseAllowedContacts,
@@ -48,6 +83,7 @@ describe('iMessage single-file channel', () => {
     vi.clearAllMocks();
     vi.mocked(readEnvFile).mockReturnValue({});
     vi.mocked(fs.existsSync).mockReturnValue(true);
+    messageRows = [];
     state.clear();
     delete process.env.IMESSAGE_ENABLED;
     delete process.env.IMESSAGE_BACKEND;
@@ -183,6 +219,68 @@ describe('iMessage single-file channel', () => {
       isRegisteredJid: () => true,
     });
     expect(fullyAllowed).toBe(true);
+  });
+
+  it('skips overlapping local-macos polls while one is in flight', async () => {
+    messageRows = [
+      {
+        rowId: 1,
+        guid: 'message-1',
+        text: 'hello',
+        attributedBody: null,
+        isFromMe: 0,
+        date: 1,
+        handleId: '+15551234567',
+        chatGuid: 'iMessage;+15551234567',
+        chatIdentifier: '+15551234567',
+        displayName: null,
+        participants: '+15551234567',
+      },
+    ];
+
+    let attemptedReentry = false;
+    const backend = new LocalMacOSIMessageBackend(
+      {
+        enabled: true,
+        backend: 'local-macos',
+        pollIntervalMs: 1500,
+        dbPath: '/tmp/chat.db',
+        allowedContacts: ['*'],
+      },
+      {
+        onChatMetadata: vi.fn(),
+        onMessage: vi.fn(() => {
+          if (attemptedReentry) return;
+          attemptedReentry = true;
+          void (
+            backend as unknown as { pollOnce: () => Promise<void> }
+          ).pollOnce();
+        }),
+        isRegisteredJid: () => true,
+      },
+    );
+
+    (
+      backend as unknown as {
+        connected: boolean;
+        pollOnce: () => Promise<void>;
+      }
+    ).connected = true;
+
+    await (
+      backend as unknown as {
+        pollOnce: () => Promise<void>;
+      }
+    ).pollOnce();
+
+    expect(attemptedReentry).toBe(true);
+    expect(
+      (
+        backend as unknown as {
+          callbacks: { onMessage: ReturnType<typeof vi.fn> };
+        }
+      ).callbacks.onMessage,
+    ).toHaveBeenCalledTimes(1);
   });
 
   it('parses attributedBody fallback and keeps text precedence', () => {

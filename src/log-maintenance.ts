@@ -53,7 +53,9 @@ function listWorkerLogs(logsDir: string): WorkerLogEntry[] {
 
   return fs
     .readdirSync(logsDir, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && WORKER_LOG_FILE_PATTERN.test(entry.name))
+    .filter(
+      (entry) => entry.isFile() && WORKER_LOG_FILE_PATTERN.test(entry.name),
+    )
     .map((entry) => {
       const filePath = path.join(logsDir, entry.name);
       const stat = fs.statSync(filePath);
@@ -176,4 +178,3 @@ export function pruneAllWorkerLogs(): void {
     pruneWorkerLogsForGroup(groupPath);
   }
 }
-

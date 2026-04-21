@@ -3,6 +3,11 @@ import path from 'path';
 
 import { LOGS_DIR } from '../config.js';
 import { logger } from '../logger.js';
+import {
+  rotateManagedAppendLog,
+  WEBSOCKET_EVENT_LOG_MAX_ARCHIVES,
+  WEBSOCKET_EVENT_LOG_MAX_BYTES,
+} from '../log-maintenance.js';
 import { formatLocalIsoTimestamp } from '../time.js';
 import {
   NormalizedWebSocketEvent,
@@ -59,6 +64,11 @@ export function appendWebSocketEventLog(
     fs.mkdirSync(path.dirname(logPath), {
       recursive: true,
     });
+    rotateManagedAppendLog(
+      logPath,
+      WEBSOCKET_EVENT_LOG_MAX_BYTES,
+      WEBSOCKET_EVENT_LOG_MAX_ARCHIVES,
+    );
     fs.appendFileSync(logPath, `${JSON.stringify(entry)}\n`, 'utf-8');
   } catch (err) {
     logger.warn({ err, path: logPath }, 'Failed to append WebSocket event log');

@@ -22,6 +22,11 @@ import {
 } from './context-config.js';
 import { getTaskById, setRegisteredGroup, updateTask } from './db.js';
 import { logger } from './logger.js';
+import {
+  CONFIG_CHANGE_LOG_MAX_ARCHIVES,
+  CONFIG_CHANGE_LOG_MAX_BYTES,
+  rotateManagedAppendLog,
+} from './log-maintenance.js';
 import { formatLocalIsoTimestamp } from './time.js';
 import { agentExecutionConfigSchema } from './agent-config.js';
 import { getWorkerWebSocketSourcesPath } from './worker-config.js';
@@ -371,6 +376,18 @@ function writeJsonFile(filePath: string, value: unknown): void {
 
 function appendConfigChangeLog(entry: Record<string, unknown>): void {
   ensureParentDir(configChangeLogPath);
+  try {
+    rotateManagedAppendLog(
+      configChangeLogPath,
+      CONFIG_CHANGE_LOG_MAX_BYTES,
+      CONFIG_CHANGE_LOG_MAX_ARCHIVES,
+    );
+  } catch (err) {
+    logger.warn(
+      { err, path: configChangeLogPath },
+      'Failed to rotate config change log',
+    );
+  }
   fs.appendFileSync(
     configChangeLogPath,
     `${JSON.stringify({

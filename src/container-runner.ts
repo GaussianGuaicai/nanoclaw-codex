@@ -17,6 +17,7 @@ import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { resolveGroupWorkerEnv } from './group-secrets.js';
 import { logger } from './logger.js';
+import { pruneWorkerLogsForGroup } from './log-maintenance.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import {
   dedupeInstructionPaths,
@@ -885,6 +886,14 @@ export async function runContainerAgent(
             loggableTimeoutLayout.sharedInstructionFiles.join('\n') || '(none)',
           ].join('\n'),
         );
+        try {
+          pruneWorkerLogsForGroup(groupPath);
+        } catch (err) {
+          logger.warn(
+            { err, group: group.name, groupPath },
+            'Failed to prune worker logs after timeout',
+          );
+        }
 
         if (hadStreamingOutput) {
           logger.info(
@@ -990,6 +999,14 @@ export async function runContainerAgent(
       }
 
       fs.writeFileSync(logFile, logLines.join('\n'));
+      try {
+        pruneWorkerLogsForGroup(groupPath);
+      } catch (err) {
+        logger.warn(
+          { err, group: group.name, groupPath },
+          'Failed to prune worker logs after write',
+        );
+      }
 
       if (code !== 0) {
         logger.error(

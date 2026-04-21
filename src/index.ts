@@ -49,6 +49,11 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import {
+  LOG_MAINTENANCE_INTERVAL_MS,
+  maintainHostLaunchdLogs,
+  pruneAllWorkerLogs,
+} from './log-maintenance.js';
+import {
   findChannel,
   formatContextTurnMessages,
   formatMessages,
@@ -132,6 +137,26 @@ let messageLoopRunning = false;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 let webSocketSourceManager: WebSocketSourceManager | null = null;
+let logMaintenanceTimer: NodeJS.Timeout | null = null;
+
+function runLogMaintenancePass(): void {
+  maintainHostLaunchdLogs();
+  pruneAllWorkerLogs();
+}
+
+function startLogMaintenanceLoop(): void {
+  if (logMaintenanceTimer) {
+    clearInterval(logMaintenanceTimer);
+  }
+
+  logMaintenanceTimer = setInterval(() => {
+    try {
+      runLogMaintenancePass();
+    } catch (err) {
+      logger.warn({ err }, 'Periodic log maintenance failed');
+    }
+  }, LOG_MAINTENANCE_INTERVAL_MS);
+}
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -754,10 +779,19 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   initializeGlobalAgentConfig();
   loadState();
+  try {
+    runLogMaintenancePass();
+  } catch (err) {
+    logger.warn({ err }, 'Startup log maintenance failed');
+  }
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    if (logMaintenanceTimer) {
+      clearInterval(logMaintenanceTimer);
+      logMaintenanceTimer = null;
+    }
     await queue.shutdown(10000);
     if (webSocketSourceManager) {
       await webSocketSourceManager.stop();
@@ -886,6 +920,7 @@ async function main(): Promise<void> {
       }
     },
   });
+  startLogMaintenanceLoop();
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {

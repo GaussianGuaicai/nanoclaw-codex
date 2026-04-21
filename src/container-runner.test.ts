@@ -10,6 +10,7 @@ const {
   validateAdditionalMounts,
   readEnvFileMock,
   resolveGroupWorkerEnvMock,
+  pruneWorkerLogsForGroupMock,
 } = vi.hoisted(() => ({
   fsMock: {
     existsSync: vi.fn(() => false),
@@ -26,6 +27,10 @@ const {
   validateAdditionalMounts: vi.fn(() => []),
   readEnvFileMock: vi.fn(() => ({})),
   resolveGroupWorkerEnvMock: vi.fn(() => ({})),
+  pruneWorkerLogsForGroupMock: vi.fn(() => ({
+    removedFiles: 0,
+    removedBytes: 0,
+  })),
 }));
 
 vi.mock('./config.js', () => ({
@@ -66,6 +71,10 @@ vi.mock('./env.js', () => ({
 
 vi.mock('./group-secrets.js', () => ({
   resolveGroupWorkerEnv: resolveGroupWorkerEnvMock,
+}));
+
+vi.mock('./log-maintenance.js', () => ({
+  pruneWorkerLogsForGroup: pruneWorkerLogsForGroupMock,
 }));
 
 function createFakeProcess() {
@@ -141,6 +150,7 @@ describe('container-runner worker execution', () => {
     vi.clearAllMocks();
     readEnvFileMock.mockReturnValue({});
     resolveGroupWorkerEnvMock.mockReturnValue({});
+    pruneWorkerLogsForGroupMock.mockClear();
     fakeProc = createFakeProcess();
     spawnMock.mockReturnValue(fakeProc);
     validateAdditionalMounts.mockReturnValue([]);
@@ -349,6 +359,9 @@ describe('container-runner worker execution', () => {
     expect(logWrite?.[1]).toContain('WebSocket-triggered prompt body');
     expect(logWrite?.[1]).toContain('=== Result ===');
     expect(logWrite?.[1]).toContain('No user-facing action needed.');
+    expect(pruneWorkerLogsForGroupMock).toHaveBeenCalledWith(
+      '/tmp/nanoclaw-test-groups/test-group',
+    );
   });
 
   it('truncates older recent turns before newer recent turns and current input', async () => {

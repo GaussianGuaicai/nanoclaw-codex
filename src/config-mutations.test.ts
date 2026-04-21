@@ -560,6 +560,32 @@ describe('config mutations', () => {
     expect(changeLog).not.toContain('secret');
   });
 
+  it('rotates oversized config change logs before appending new entries', async () => {
+    const changeLogPath = path.join(paths.logsDir, 'config-changes.log');
+    fs.writeFileSync(changeLogPath, 'X'.repeat(4 * 1024 * 1024 + 1), 'utf-8');
+
+    const result = await applyConfigUpdate(
+      {
+        domain: 'agent',
+        scope: 'global',
+        changes: {
+          defaults: {
+            reasoningEffort: 'high',
+          },
+        },
+        reason: 'rotation check',
+        actorGroup: 'main',
+        isMain: true,
+      },
+      deps,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(fs.existsSync(`${changeLogPath}.1`)).toBe(true);
+    const currentLog = fs.readFileSync(changeLogPath, 'utf-8');
+    expect(currentLog).toContain('"reason":"rotation check"');
+  });
+
   it('updates a group-owned websocket subscription for a target group', async () => {
     writeJson(
       path.join(

@@ -166,6 +166,59 @@ describe('GroupQueue', () => {
     expect(callCount).toBe(3);
   });
 
+  it('clears retry timers and halts retries when auth is blocked', async () => {
+    let callCount = 0;
+    const processMessages = vi.fn(async () => {
+      callCount++;
+      return false;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(callCount).toBe(1);
+    expect(vi.getTimerCount()).toBe(1);
+
+    queue.blockAuth('group1@g.us', 'refresh_token_reused');
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(callCount).toBe(1);
+  });
+
+  it('resumes processing after auth block is cleared', async () => {
+    const processMessages = vi.fn(async () => true);
+    queue.setProcessMessagesFn(processMessages);
+
+    queue.blockAuth('group1@g.us', 'auth_failure');
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(processMessages).not.toHaveBeenCalled();
+
+    queue.clearAuthBlock('group1@g.us');
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(processMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it('deduplicates retry timers for rapid repeated failures in same group', async () => {
+    let callCount = 0;
+    const processMessages = vi.fn(async () => {
+      callCount++;
+      return false;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(callCount).toBe(1);
+    expect(vi.getTimerCount()).toBe(1);
+
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(callCount).toBe(2);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
   // --- Shutdown prevents new enqueues ---
 
   it('prevents new enqueues after shutdown', async () => {

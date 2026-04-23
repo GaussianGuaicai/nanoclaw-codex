@@ -30,6 +30,7 @@ import {
   prepareContextSessionForTurn,
   recordCompletedContextTurn,
 } from './context-runtime.js';
+import { codexAuthManager } from './codex-auth-manager.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -330,6 +331,42 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
+  if (output.failureKind === 'auth_failure' && codexAuthManager.isEnabled()) {
+    const reason = output.error || 'auth_failure';
+    if (outputSentToUser) {
+      logger.warn(
+        { group: group.name },
+        'Auth failure happened after output was sent, skipping cursor rollback',
+      );
+    } else {
+      // Preserve pending messages for replay after credentials recover.
+      lastAgentTimestamp[chatJid] = previousCursor;
+      saveState();
+      logger.warn(
+        { group: group.name },
+        'Auth failure detected, rolled back message cursor for recovery',
+      );
+    }
+
+    queue.blockAuth(chatJid, reason);
+    const repaired = codexAuthManager.attemptAutoRepair(group.folder, reason);
+    if (repaired) {
+      queue.clearAuthBlock(chatJid);
+      queue.enqueueMessageCheck(chatJid);
+      logger.info(
+        { group: group.name },
+        'Auth auto-repair succeeded, resumed queued messages',
+      );
+    } else {
+      logger.warn(
+        { group: group.name },
+        'Auth auto-repair failed, group remains blocked',
+      );
+    }
+    // Auth failures are handled by the auth manager path, not generic retries.
+    return true;
+  }
+
   if (output.status === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
@@ -625,15 +662,27 @@ function enqueueWebSocketEventTask(params: {
             subscriptionId: params.subscriptionId,
             targetJid: params.targetJid,
             error: execution.error,
+            failureKind: execution.failureKind,
           },
           'WS event task failed',
         );
-        publishBackgroundActivity({
-          chatJid: params.targetJid,
-          source: 'websocket',
-          result: execution.result,
-          error: execution.error,
-        });
+        if (execution.failureKind !== 'auth_failure') {
+          publishBackgroundActivity({
+            chatJid: params.targetJid,
+            source: 'websocket',
+            result: execution.result,
+            error: execution.error,
+          });
+        } else {
+          logger.info(
+            {
+              connection: params.connectionName,
+              subscriptionId: params.subscriptionId,
+              targetJid: params.targetJid,
+            },
+            'Suppressing WS auth failure output (silent auth recovery mode)',
+          );
+        }
       } else {
         logger.info(
           {

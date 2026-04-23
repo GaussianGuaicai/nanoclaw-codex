@@ -19,12 +19,15 @@ interface GroupState {
   idleWaiting: boolean;
   isTaskWorker: boolean;
   runningTaskId: string | null;
+  authBlocked: boolean;
+  authBlockReason: string | null;
   pendingMessages: boolean;
   pendingTasks: QueuedTask[];
   process: ChildProcess | null;
   executionName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  retryTimer: ReturnType<typeof setTimeout> | null;
 }
 
 export class GroupQueue {
@@ -43,12 +46,15 @@ export class GroupQueue {
         idleWaiting: false,
         isTaskWorker: false,
         runningTaskId: null,
+        authBlocked: false,
+        authBlockReason: null,
         pendingMessages: false,
         pendingTasks: [],
         process: null,
         executionName: null,
         groupFolder: null,
         retryCount: 0,
+        retryTimer: null,
       };
       this.groups.set(groupJid, state);
     }
@@ -63,6 +69,14 @@ export class GroupQueue {
     if (this.shuttingDown) return;
 
     const state = this.getGroup(groupJid);
+    if (state.authBlocked) {
+      state.pendingMessages = true;
+      logger.info(
+        { groupJid, reason: state.authBlockReason },
+        'Auth blocked, message queued until credentials recover',
+      );
+      return;
+    }
 
     if (state.active) {
       state.pendingMessages = true;
@@ -99,6 +113,15 @@ export class GroupQueue {
     }
     if (state.pendingTasks.some((t) => t.id === taskId)) {
       logger.debug({ groupJid, taskId }, 'Task already queued, skipping');
+      return;
+    }
+
+    if (state.authBlocked) {
+      state.pendingTasks.push({ id: taskId, groupJid, fn });
+      logger.info(
+        { groupJid, taskId, reason: state.authBlockReason },
+        'Auth blocked, task queued until credentials recover',
+      );
       return;
     }
 
@@ -151,6 +174,29 @@ export class GroupQueue {
     if (state.pendingTasks.length > 0) {
       this.closeStdin(groupJid);
     }
+  }
+
+  blockAuth(groupJid: string, reason: string): void {
+    const state = this.getGroup(groupJid);
+    state.authBlocked = true;
+    state.authBlockReason = reason;
+    state.pendingMessages = true;
+    this.clearRetryTimer(state);
+    logger.warn({ groupJid }, 'Credentials blocked for group');
+  }
+
+  clearAuthBlock(groupJid: string): void {
+    const state = this.getGroup(groupJid);
+    if (!state.authBlocked) return;
+    state.authBlocked = false;
+    state.authBlockReason = null;
+    state.retryCount = 0;
+    this.clearRetryTimer(state);
+    logger.info({ groupJid }, 'Credentials unblocked for group');
+  }
+
+  isAuthBlocked(groupJid: string): boolean {
+    return this.getGroup(groupJid).authBlocked;
   }
 
   /**
@@ -213,6 +259,7 @@ export class GroupQueue {
     reason: 'messages' | 'drain',
   ): Promise<void> {
     const state = this.getGroup(groupJid);
+    this.clearRetryTimer(state);
     state.active = true;
     state.idleWaiting = false;
     state.isTaskWorker = false;
@@ -276,6 +323,21 @@ export class GroupQueue {
   }
 
   private scheduleRetry(groupJid: string, state: GroupState): void {
+    if (state.authBlocked) {
+      logger.info(
+        { groupJid },
+        'Skipping retry scheduling because credentials are blocked',
+      );
+      return;
+    }
+    if (state.retryTimer) {
+      logger.debug(
+        { groupJid, retryCount: state.retryCount },
+        'Retry already scheduled, skipping duplicate timer',
+      );
+      return;
+    }
+
     state.retryCount++;
     if (state.retryCount > MAX_RETRIES) {
       logger.error(
@@ -291,7 +353,8 @@ export class GroupQueue {
       { groupJid, retryCount: state.retryCount, delayMs },
       'Scheduling retry with backoff',
     );
-    setTimeout(() => {
+    state.retryTimer = setTimeout(() => {
+      state.retryTimer = null;
       if (!this.shuttingDown) {
         this.enqueueMessageCheck(groupJid);
       }
@@ -302,6 +365,10 @@ export class GroupQueue {
     if (this.shuttingDown) return;
 
     const state = this.getGroup(groupJid);
+    if (state.authBlocked) {
+      this.drainWaiting();
+      return;
+    }
 
     // Tasks first (they won't be re-discovered from SQLite like messages)
     if (state.pendingTasks.length > 0) {
@@ -359,6 +426,12 @@ export class GroupQueue {
     }
   }
 
+  private clearRetryTimer(state: GroupState): void {
+    if (!state.retryTimer) return;
+    clearTimeout(state.retryTimer);
+    state.retryTimer = null;
+  }
+
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 
@@ -367,6 +440,7 @@ export class GroupQueue {
     // This prevents WhatsApp reconnection restarts from killing working agents.
     const activeWorkers: string[] = [];
     for (const [jid, state] of this.groups) {
+      this.clearRetryTimer(state);
       if (state.process && !state.process.killed && state.executionName) {
         activeWorkers.push(state.executionName);
       }

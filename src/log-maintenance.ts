@@ -87,7 +87,7 @@ export function compactLaunchdLogInPlace(
 ): boolean {
   if (!fs.existsSync(filePath)) return false;
   const stat = fs.statSync(filePath);
-  if (stat.size <= maxBytes) return false;
+  if (stat.size < maxBytes) return false;
 
   const nextSize = Math.max(1, Math.min(retainBytes, maxBytes));
   const tail = readTailBytes(filePath, nextSize);
@@ -102,7 +102,7 @@ export function rotateManagedAppendLog(
 ): boolean {
   if (!fs.existsSync(filePath)) return false;
   const stat = fs.statSync(filePath);
-  if (stat.size <= maxBytes) return false;
+  if (stat.size < maxBytes) return false;
 
   const archiveCount = Math.max(0, maxArchives);
   if (archiveCount > 0) {
@@ -124,6 +124,25 @@ export function rotateManagedAppendLog(
 
   fs.writeFileSync(filePath, '');
   return true;
+}
+
+export function appendManagedJsonLine(
+  filePath: string,
+  line: string,
+  maxBytes: number,
+  maxArchives: number,
+): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+
+  const serializedLine = `${line}\n`;
+  const currentSize = fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
+  const nextSize = currentSize + Buffer.byteLength(serializedLine);
+
+  if (currentSize > maxBytes || nextSize > maxBytes) {
+    rotateManagedAppendLog(filePath, maxBytes, maxArchives);
+  }
+
+  fs.appendFileSync(filePath, serializedLine, 'utf-8');
 }
 
 export function pruneWorkerLogsForGroup(
@@ -161,6 +180,8 @@ export function pruneWorkerLogsForGroup(
 }
 
 export function maintainHostLaunchdLogs(): void {
+  // This is intentionally not called from the automatic maintenance loop.
+  // launchd keeps writing to these files, so compacting them live can drop data.
   compactLaunchdLogInPlace(
     path.join(LOGS_DIR, 'nanoclaw.log'),
     NANOCLAW_LOG_MAX_BYTES,

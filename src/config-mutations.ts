@@ -25,7 +25,7 @@ import { logger } from './logger.js';
 import {
   CONFIG_CHANGE_LOG_MAX_ARCHIVES,
   CONFIG_CHANGE_LOG_MAX_BYTES,
-  rotateManagedAppendLog,
+  appendManagedJsonLine,
 } from './log-maintenance.js';
 import { formatLocalIsoTimestamp } from './time.js';
 import { agentExecutionConfigSchema } from './agent-config.js';
@@ -375,10 +375,13 @@ function writeJsonFile(filePath: string, value: unknown): void {
 }
 
 function appendConfigChangeLog(entry: Record<string, unknown>): void {
-  ensureParentDir(configChangeLogPath);
   try {
-    rotateManagedAppendLog(
+    appendManagedJsonLine(
       configChangeLogPath,
+      JSON.stringify({
+        timestamp: formatLocalIsoTimestamp(),
+        ...sanitizeConfigChangeLogEntry(entry),
+      }),
       CONFIG_CHANGE_LOG_MAX_BYTES,
       CONFIG_CHANGE_LOG_MAX_ARCHIVES,
     );
@@ -388,13 +391,6 @@ function appendConfigChangeLog(entry: Record<string, unknown>): void {
       'Failed to rotate config change log',
     );
   }
-  fs.appendFileSync(
-    configChangeLogPath,
-    `${JSON.stringify({
-      timestamp: formatLocalIsoTimestamp(),
-      ...sanitizeConfigChangeLogEntry(entry),
-    })}\n`,
-  );
 }
 
 function sanitizeConfigChangeLogEntry(

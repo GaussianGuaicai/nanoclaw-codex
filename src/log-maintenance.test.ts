@@ -5,6 +5,7 @@ import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  appendManagedJsonLine,
   compactLaunchdLogInPlace,
   pruneWorkerLogsForGroup,
   rotateManagedAppendLog,
@@ -62,6 +63,20 @@ describe('log maintenance', () => {
     rotateManagedAppendLog(logPath, 10, 2);
     expect(fs.readFileSync(`${logPath}.1`, 'utf-8')).toBe('C'.repeat(20));
     expect(fs.readFileSync(`${logPath}.2`, 'utf-8')).toBe('B'.repeat(20));
+  });
+
+  it('rotates append logs before writing when the next line would exceed the cap', () => {
+    const root = createTempRoot();
+    tempRoots.push(root);
+
+    const logPath = path.join(root, 'config-changes.log');
+    fs.writeFileSync(logPath, 'X'.repeat(10));
+
+    appendManagedJsonLine(logPath, '{"reason":"rotation"}', 10, 2);
+
+    expect(fs.existsSync(`${logPath}.1`)).toBe(true);
+    expect(fs.readFileSync(logPath, 'utf-8')).toContain('rotation');
+    expect(fs.readFileSync(`${logPath}.1`, 'utf-8')).toBe('X'.repeat(10));
   });
 
   it('prunes worker logs by oldest-first count and total-size limits', () => {

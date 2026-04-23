@@ -160,7 +160,10 @@ describe('CodexAuthManager', () => {
     fs.utimesSync(groupAuthPath, newer, newer);
 
     const manager = new CodexAuthManager({ sourceDir, enabled: true });
-    const repaired = manager.attemptAutoRepair('group-e', 'refresh_token_reused');
+    const repaired = manager.attemptAutoRepair(
+      'group-e',
+      'refresh_token_reused',
+    );
 
     expect(repaired).toBe(false);
   });

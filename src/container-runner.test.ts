@@ -647,9 +647,9 @@ describe('container-runner worker execution', () => {
       'test-group',
     );
     expect(releaseStartupGateMock).toHaveBeenCalledTimes(1);
-    expect(codexAuthManagerMock.promoteGroupToGlobalIfNewer).toHaveBeenCalledWith(
-      'test-group',
-    );
+    expect(
+      codexAuthManagerMock.promoteGroupToGlobalIfNewer,
+    ).toHaveBeenCalledWith('test-group');
   });
 
   it('skips auth manager handshake when OPENAI_API_KEY is provided', async () => {
@@ -657,7 +657,11 @@ describe('container-runner worker execution', () => {
       OPENAI_API_KEY: 'sdk-secret',
     });
 
-    const resultPromise = runContainerAgent(testGroup, { ...testInput }, () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      { ...testInput },
+      () => {},
+    );
 
     emitOutputMarker(fakeProc, {
       status: 'success',
@@ -669,11 +673,17 @@ describe('container-runner worker execution', () => {
 
     expect(codexAuthManagerMock.syncGlobalToGroup).not.toHaveBeenCalled();
     expect(codexAuthManagerMock.enterStartupGate).not.toHaveBeenCalled();
-    expect(codexAuthManagerMock.promoteGroupToGlobalIfNewer).not.toHaveBeenCalled();
+    expect(
+      codexAuthManagerMock.promoteGroupToGlobalIfNewer,
+    ).not.toHaveBeenCalled();
   });
 
   it('classifies refresh_token_reused worker failures as auth_failure', async () => {
-    const resultPromise = runContainerAgent(testGroup, { ...testInput }, () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      { ...testInput },
+      () => {},
+    );
     await Promise.resolve();
 
     fakeProc.stderr.push('refresh_token_reused: token already consumed');

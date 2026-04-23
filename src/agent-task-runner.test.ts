@@ -436,10 +436,7 @@ describe('runSingleTurnAgentTask', () => {
 
     expect(result.status).toBe('error');
     expect(result.failureKind).toBe('auth_failure');
-    expect(blockAuth).toHaveBeenCalledWith(
-      'chat@g.us',
-      'refresh_token_reused',
-    );
+    expect(blockAuth).toHaveBeenCalledWith('chat@g.us', 'refresh_token_reused');
     expect(codexAuthManagerMock.attemptAutoRepair).toHaveBeenCalledWith(
       'team',
       'refresh_token_reused',

@@ -754,7 +754,10 @@ export async function runContainerAgent(
     try {
       codexAuthManager.syncGlobalToGroup(group.folder);
     } catch (err) {
-      logger.warn({ group: group.name, err }, 'auth-manager: startup sync failed');
+      logger.warn(
+        { group: group.name, err },
+        'auth-manager: startup sync failed',
+      );
     }
   }
 

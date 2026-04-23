@@ -57,7 +57,9 @@ class AsyncGate {
   }
 }
 
-export function classifyFailureKind(raw: string | undefined): ContainerFailureKind {
+export function classifyFailureKind(
+  raw: string | undefined,
+): ContainerFailureKind {
   if (!raw) return 'worker_error';
 
   const text = raw.toLowerCase();
@@ -71,7 +73,8 @@ export function classifyFailureKind(raw: string | undefined): ContainerFailureKi
   }
   if (text.includes('timed out')) return 'timeout';
   if (text.includes('spawn error')) return 'spawn_error';
-  if (text.includes('failed to parse worker output')) return 'output_parse_error';
+  if (text.includes('failed to parse worker output'))
+    return 'output_parse_error';
   return 'worker_error';
 }
 
@@ -233,7 +236,9 @@ export class CodexAuthManager {
   ): Array<{ groupFolder: string; path: string }> {
     const candidates: Array<{ groupFolder: string; path: string }> = [];
     const pushCandidate = (groupFolder: string) => {
-      if (candidates.some((candidate) => candidate.groupFolder === groupFolder)) {
+      if (
+        candidates.some((candidate) => candidate.groupFolder === groupFolder)
+      ) {
         return;
       }
       candidates.push({
@@ -280,7 +285,10 @@ export class CodexAuthManager {
       .slice(2, 8)}`;
 
     fs.rmSync(tempDir, { recursive: true, force: true });
-    fs.cpSync(sourceDir, tempDir, { recursive: true, preserveTimestamps: true });
+    fs.cpSync(sourceDir, tempDir, {
+      recursive: true,
+      preserveTimestamps: true,
+    });
     fs.rmSync(targetDir, { recursive: true, force: true });
     fs.renameSync(tempDir, targetDir);
   }

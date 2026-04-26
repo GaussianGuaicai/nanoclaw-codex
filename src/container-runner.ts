@@ -753,7 +753,9 @@ export async function runContainerAgent(
 
   if (usesCodexHomeAuth && codexAuthManager.isEnabled()) {
     try {
-      releaseStartupGate = await codexAuthManager.enterStartupGate(group.folder);
+      releaseStartupGate = await codexAuthManager.enterStartupGate(
+        group.folder,
+      );
     } catch (err) {
       logger.warn(
         { group: group.name, err },

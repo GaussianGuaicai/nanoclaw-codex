@@ -49,7 +49,10 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
-import { LOG_MAINTENANCE_INTERVAL_MS, pruneAllWorkerLogs } from './log-maintenance.js';
+import {
+  LOG_MAINTENANCE_INTERVAL_MS,
+  pruneAllWorkerLogs,
+} from './log-maintenance.js';
 import {
   findChannel,
   formatContextTurnMessages,

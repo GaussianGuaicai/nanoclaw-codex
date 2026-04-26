@@ -221,7 +221,9 @@ export class CodexAuthManager {
     if (this.isCodexHomeUsable(this.credentialsDir)) return true;
 
     const skipSet = new Set(options.skipGroupFolders || []);
-    const candidates = this.discoverGroupCandidates(options.preferredGroupFolder);
+    const candidates = this.discoverGroupCandidates(
+      options.preferredGroupFolder,
+    );
     const source = candidates.find(
       (candidate) =>
         !skipSet.has(candidate.groupFolder) &&

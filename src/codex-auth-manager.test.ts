@@ -200,7 +200,10 @@ describe('CodexAuthManager', () => {
 
     expect(repaired).toBe(true);
     const globalAuth = JSON.parse(
-      fs.readFileSync(path.join(sourceDir, 'credentials', 'auth.json'), 'utf-8'),
+      fs.readFileSync(
+        path.join(sourceDir, 'credentials', 'auth.json'),
+        'utf-8',
+      ),
     ) as Record<string, any>;
     expect(globalAuth.tokens?.access_token).toBe('healthy-token');
 

@@ -13,6 +13,12 @@ interface QueuedTask {
 
 const MAX_RETRIES = 5;
 const BASE_RETRY_MS = 5000;
+const MAX_AUTH_REPAIR_DELAY_MS = 60000;
+
+type AuthRepairFn = (
+  groupJid: string,
+  reason: string,
+) => boolean | Promise<boolean>;
 
 interface GroupState {
   active: boolean;
@@ -36,6 +42,7 @@ export class GroupQueue {
   private waitingGroups: string[] = [];
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
+  private authRepairFn: AuthRepairFn | null = null;
   private shuttingDown = false;
 
   private getGroup(groupJid: string): GroupState {
@@ -65,12 +72,17 @@ export class GroupQueue {
     this.processMessagesFn = fn;
   }
 
+  setAuthRepairFn(fn: AuthRepairFn): void {
+    this.authRepairFn = fn;
+  }
+
   enqueueMessageCheck(groupJid: string): void {
     if (this.shuttingDown) return;
 
     const state = this.getGroup(groupJid);
     if (state.authBlocked) {
       state.pendingMessages = true;
+      this.scheduleAuthRecovery(groupJid, state);
       logger.info(
         { groupJid, reason: state.authBlockReason },
         'Auth blocked, message queued until credentials recover',
@@ -118,6 +130,7 @@ export class GroupQueue {
 
     if (state.authBlocked) {
       state.pendingTasks.push({ id: taskId, groupJid, fn });
+      this.scheduleAuthRecovery(groupJid, state);
       logger.info(
         { groupJid, taskId, reason: state.authBlockReason },
         'Auth blocked, task queued until credentials recover',
@@ -182,6 +195,7 @@ export class GroupQueue {
     state.authBlockReason = reason;
     state.pendingMessages = true;
     this.clearRetryTimer(state);
+    this.scheduleAuthRecovery(groupJid, state);
     logger.warn({ groupJid }, 'Credentials blocked for group');
   }
 
@@ -359,6 +373,64 @@ export class GroupQueue {
         this.enqueueMessageCheck(groupJid);
       }
     }, delayMs);
+  }
+
+  private scheduleAuthRecovery(groupJid: string, state: GroupState): void {
+    if (!state.authBlocked || this.shuttingDown) return;
+    if (!this.authRepairFn) {
+      logger.debug(
+        { groupJid },
+        'No auth repair callback configured for blocked group',
+      );
+      return;
+    }
+    if (state.retryTimer) {
+      logger.debug(
+        { groupJid, retryCount: state.retryCount },
+        'Auth repair retry already scheduled, skipping duplicate timer',
+      );
+      return;
+    }
+
+    state.retryCount++;
+    const delayMs = Math.min(
+      BASE_RETRY_MS * Math.pow(2, state.retryCount - 1),
+      MAX_AUTH_REPAIR_DELAY_MS,
+    );
+    logger.info(
+      { groupJid, retryCount: state.retryCount, delayMs },
+      'Scheduling auth repair retry',
+    );
+    state.retryTimer = setTimeout(() => {
+      state.retryTimer = null;
+      this.runAuthRecovery(groupJid).catch((err) =>
+        logger.warn({ groupJid, err }, 'Auth repair retry failed'),
+      );
+    }, delayMs);
+  }
+
+  private async runAuthRecovery(groupJid: string): Promise<void> {
+    if (this.shuttingDown) return;
+    const state = this.getGroup(groupJid);
+    if (!state.authBlocked || !this.authRepairFn) return;
+
+    const reason = state.authBlockReason || 'auth_failure';
+    let repaired = false;
+    try {
+      repaired = await this.authRepairFn(groupJid, reason);
+    } catch (err) {
+      logger.warn({ groupJid, err }, 'Auth repair callback failed');
+    }
+
+    if (repaired) {
+      this.clearAuthBlock(groupJid);
+      this.drainGroup(groupJid);
+      logger.info({ groupJid }, 'Auth repair retry succeeded');
+      return;
+    }
+
+    logger.warn({ groupJid }, 'Auth repair retry did not recover credentials');
+    this.scheduleAuthRecovery(groupJid, state);
   }
 
   private drainGroup(groupJid: string): void {

@@ -133,6 +133,14 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+queue.setAuthRepairFn((chatJid, reason) => {
+  const group = registeredGroups[chatJid];
+  if (!group) {
+    logger.warn({ chatJid }, 'Auth repair retry skipped for unknown group');
+    return false;
+  }
+  return codexAuthManager.attemptAutoRepair(group.folder, reason);
+});
 let webSocketSourceManager: WebSocketSourceManager | null = null;
 let logMaintenanceTimer: NodeJS.Timeout | null = null;
 

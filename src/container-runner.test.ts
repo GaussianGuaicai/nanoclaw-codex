@@ -646,6 +646,11 @@ describe('container-runner worker execution', () => {
     expect(codexAuthManagerMock.enterStartupGate).toHaveBeenCalledWith(
       'test-group',
     );
+    expect(
+      codexAuthManagerMock.enterStartupGate.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      codexAuthManagerMock.syncGlobalToGroup.mock.invocationCallOrder[0],
+    );
     expect(releaseStartupGateMock).toHaveBeenCalledTimes(1);
     expect(
       codexAuthManagerMock.promoteGroupToGlobalIfNewer,

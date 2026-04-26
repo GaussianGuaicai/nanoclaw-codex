@@ -749,8 +749,18 @@ export async function runContainerAgent(
   input.sdkSecrets = readSdkSecrets();
   input.workerEnv = resolveGroupWorkerEnv(group.folder);
   const usesCodexHomeAuth = !input.sdkSecrets.OPENAI_API_KEY;
+  let releaseStartupGate: (() => void) | null = null;
 
   if (usesCodexHomeAuth && codexAuthManager.isEnabled()) {
+    try {
+      releaseStartupGate = await codexAuthManager.enterStartupGate(group.folder);
+    } catch (err) {
+      logger.warn(
+        { group: group.name, err },
+        'auth-manager: startup gate acquire failed',
+      );
+    }
+
     try {
       codexAuthManager.syncGlobalToGroup(group.folder);
     } catch (err) {
@@ -760,11 +770,6 @@ export async function runContainerAgent(
       );
     }
   }
-
-  const releaseStartupGate =
-    usesCodexHomeAuth && codexAuthManager.isEnabled()
-      ? await codexAuthManager.enterStartupGate(group.folder)
-      : null;
 
   return new Promise((resolve) => {
     const worker = spawn(launch.command, launch.args, {

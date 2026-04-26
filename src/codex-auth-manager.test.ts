@@ -167,4 +167,46 @@ describe('CodexAuthManager', () => {
 
     expect(repaired).toBe(false);
   });
+
+  it('auto-repair bootstraps global credentials from non-failing group', () => {
+    const sourceDir = path.join(TEST_DATA_DIR, 'source-f');
+    const failingHome = path.join(
+      TEST_DATA_DIR,
+      'sessions',
+      'group-failing',
+      '.codex',
+    );
+    const healthyHome = path.join(
+      TEST_DATA_DIR,
+      'sessions',
+      'group-healthy',
+      '.codex',
+    );
+    writeAuthFile(failingHome, 'stale-token');
+    writeAuthFile(healthyHome, 'healthy-token');
+
+    const staleAuthPath = path.join(failingHome, 'auth.json');
+    const healthyAuthPath = path.join(healthyHome, 'auth.json');
+    const older = new Date(Date.now() - 60_000);
+    const newer = new Date();
+    fs.utimesSync(staleAuthPath, older, older);
+    fs.utimesSync(healthyAuthPath, newer, newer);
+
+    const manager = new CodexAuthManager({ sourceDir, enabled: true });
+    const repaired = manager.attemptAutoRepair(
+      'group-failing',
+      'refresh_token_reused',
+    );
+
+    expect(repaired).toBe(true);
+    const globalAuth = JSON.parse(
+      fs.readFileSync(path.join(sourceDir, 'credentials', 'auth.json'), 'utf-8'),
+    ) as Record<string, any>;
+    expect(globalAuth.tokens?.access_token).toBe('healthy-token');
+
+    const repairedGroupAuth = JSON.parse(
+      fs.readFileSync(path.join(failingHome, 'auth.json'), 'utf-8'),
+    ) as Record<string, any>;
+    expect(repairedGroupAuth.tokens?.access_token).toBe('healthy-token');
+  });
 });

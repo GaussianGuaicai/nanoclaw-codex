@@ -36,6 +36,11 @@ interface CodexAuthState {
   lastFailure?: AuthFailureState;
 }
 
+interface EnsureGlobalInitOptions {
+  preferredGroupFolder?: string;
+  skipGroupFolders?: string[];
+}
+
 class AsyncGate {
   private tail = Promise.resolve();
 
@@ -113,7 +118,7 @@ export class CodexAuthManager {
   syncGlobalToGroup(groupFolder: string): boolean {
     if (!this.enabled) return false;
 
-    if (!this.ensureGlobalInitialized(groupFolder)) {
+    if (!this.ensureGlobalInitialized({ preferredGroupFolder: groupFolder })) {
       return false;
     }
 
@@ -156,7 +161,7 @@ export class CodexAuthManager {
     if (!this.enabled) return false;
     this.recordAuthFailure(groupFolder, reason);
 
-    if (!this.ensureGlobalInitialized(groupFolder)) {
+    if (!this.ensureGlobalInitialized({ skipGroupFolders: [groupFolder] })) {
       logger.warn(
         { groupFolder },
         'auth-manager: no global credentials available for auto-repair',
@@ -210,12 +215,17 @@ export class CodexAuthManager {
     logger.warn({ groupFolder }, 'auth-manager: recorded auth failure');
   }
 
-  private ensureGlobalInitialized(preferredGroupFolder?: string): boolean {
+  private ensureGlobalInitialized(
+    options: EnsureGlobalInitOptions = {},
+  ): boolean {
     if (this.isCodexHomeUsable(this.credentialsDir)) return true;
 
-    const candidates = this.discoverGroupCandidates(preferredGroupFolder);
-    const source = candidates.find((candidate) =>
-      this.isCodexHomeUsable(candidate.path),
+    const skipSet = new Set(options.skipGroupFolders || []);
+    const candidates = this.discoverGroupCandidates(options.preferredGroupFolder);
+    const source = candidates.find(
+      (candidate) =>
+        !skipSet.has(candidate.groupFolder) &&
+        this.isCodexHomeUsable(candidate.path),
     );
     if (!source) return false;
 

@@ -152,15 +152,23 @@ async function runTask(
 
   const result = execution.result;
   const error = execution.error;
+  const failureKind = execution.failureKind;
 
   if (error) {
-    logger.error({ taskId: task.id, error }, 'Task failed');
-    deps.publishBackgroundActivity?.({
-      chatJid: task.chat_jid,
-      source: 'scheduled',
-      result,
-      error,
-    });
+    logger.error({ taskId: task.id, error, failureKind }, 'Task failed');
+    if (failureKind !== 'auth_failure') {
+      deps.publishBackgroundActivity?.({
+        chatJid: task.chat_jid,
+        source: 'scheduled',
+        result,
+        error,
+      });
+    } else {
+      logger.info(
+        { taskId: task.id, chatJid: task.chat_jid },
+        'Suppressing scheduled auth failure output (silent auth recovery mode)',
+      );
+    }
   } else {
     logger.info(
       { taskId: task.id, durationMs: Date.now() - startTime },

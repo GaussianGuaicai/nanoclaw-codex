@@ -10,6 +10,9 @@ const {
   validateAdditionalMounts,
   readEnvFileMock,
   resolveGroupWorkerEnvMock,
+  pruneWorkerLogsForGroupMock,
+  codexAuthManagerMock,
+  releaseStartupGateMock,
 } = vi.hoisted(() => ({
   fsMock: {
     existsSync: vi.fn(() => false),
@@ -26,6 +29,17 @@ const {
   validateAdditionalMounts: vi.fn(() => []),
   readEnvFileMock: vi.fn(() => ({})),
   resolveGroupWorkerEnvMock: vi.fn(() => ({})),
+  pruneWorkerLogsForGroupMock: vi.fn(() => ({
+    removedFiles: 0,
+    removedBytes: 0,
+  })),
+  releaseStartupGateMock: vi.fn(),
+  codexAuthManagerMock: {
+    isEnabled: vi.fn(() => true),
+    syncGlobalToGroup: vi.fn(),
+    enterStartupGate: vi.fn(async () => releaseStartupGateMock),
+    promoteGroupToGlobalIfNewer: vi.fn(),
+  },
 }));
 
 vi.mock('./config.js', () => ({
@@ -66,6 +80,30 @@ vi.mock('./env.js', () => ({
 
 vi.mock('./group-secrets.js', () => ({
   resolveGroupWorkerEnv: resolveGroupWorkerEnvMock,
+}));
+
+vi.mock('./log-maintenance.js', () => ({
+  pruneWorkerLogsForGroup: pruneWorkerLogsForGroupMock,
+}));
+
+vi.mock('./codex-auth-manager.js', () => ({
+  classifyFailureKind: (raw?: string) => {
+    const text = (raw || '').toLowerCase();
+    if (
+      text.includes('refresh_token_reused') ||
+      text.includes('provided authentication token is expired') ||
+      text.includes('could not be refreshed') ||
+      text.includes('failed to refresh token')
+    ) {
+      return 'auth_failure';
+    }
+    if (text.includes('timed out')) return 'timeout';
+    if (text.includes('spawn error')) return 'spawn_error';
+    if (text.includes('failed to parse worker output'))
+      return 'output_parse_error';
+    return 'worker_error';
+  },
+  codexAuthManager: codexAuthManagerMock,
 }));
 
 function createFakeProcess() {
@@ -141,6 +179,15 @@ describe('container-runner worker execution', () => {
     vi.clearAllMocks();
     readEnvFileMock.mockReturnValue({});
     resolveGroupWorkerEnvMock.mockReturnValue({});
+    pruneWorkerLogsForGroupMock.mockClear();
+    releaseStartupGateMock.mockClear();
+    codexAuthManagerMock.isEnabled.mockReturnValue(true);
+    codexAuthManagerMock.syncGlobalToGroup.mockClear();
+    codexAuthManagerMock.enterStartupGate.mockClear();
+    codexAuthManagerMock.enterStartupGate.mockImplementation(
+      async () => releaseStartupGateMock,
+    );
+    codexAuthManagerMock.promoteGroupToGlobalIfNewer.mockClear();
     fakeProc = createFakeProcess();
     spawnMock.mockReturnValue(fakeProc);
     validateAdditionalMounts.mockReturnValue([]);
@@ -349,6 +396,9 @@ describe('container-runner worker execution', () => {
     expect(logWrite?.[1]).toContain('WebSocket-triggered prompt body');
     expect(logWrite?.[1]).toContain('=== Result ===');
     expect(logWrite?.[1]).toContain('No user-facing action needed.');
+    expect(pruneWorkerLogsForGroupMock).toHaveBeenCalledWith(
+      '/tmp/nanoclaw-test-groups/test-group',
+    );
   });
 
   it('truncates older recent turns before newer recent turns and current input', async () => {
@@ -502,6 +552,7 @@ describe('container-runner worker execution', () => {
       () => {},
       onOutput,
     );
+    await Promise.resolve();
 
     emitOutputMarker(fakeProc, {
       status: 'success',
@@ -568,6 +619,85 @@ describe('container-runner worker execution', () => {
       HOME_ASSISTANT_URL: 'https://ha.example',
       HASS_ACCESS_TOKEN: 'worker-secret',
     });
+  });
+
+  it('uses auth manager sync + startup gate + promotion in CODEX_HOME mode', async () => {
+    readEnvFileMock.mockReturnValue({});
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      { ...testInput },
+      () => {},
+      async () => {},
+    );
+    await Promise.resolve();
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'ok',
+      newSessionId: 'session-auth-manager',
+    });
+    fakeProc.emit('close', 0);
+    await resultPromise;
+
+    expect(codexAuthManagerMock.syncGlobalToGroup).toHaveBeenCalledWith(
+      'test-group',
+    );
+    expect(codexAuthManagerMock.enterStartupGate).toHaveBeenCalledWith(
+      'test-group',
+    );
+    expect(
+      codexAuthManagerMock.enterStartupGate.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      codexAuthManagerMock.syncGlobalToGroup.mock.invocationCallOrder[0],
+    );
+    expect(releaseStartupGateMock).toHaveBeenCalledTimes(1);
+    expect(
+      codexAuthManagerMock.promoteGroupToGlobalIfNewer,
+    ).toHaveBeenCalledWith('test-group');
+  });
+
+  it('skips auth manager handshake when OPENAI_API_KEY is provided', async () => {
+    readEnvFileMock.mockReturnValue({
+      OPENAI_API_KEY: 'sdk-secret',
+    });
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      { ...testInput },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'ok',
+      newSessionId: 'session-api-key',
+    });
+    fakeProc.emit('close', 0);
+    await resultPromise;
+
+    expect(codexAuthManagerMock.syncGlobalToGroup).not.toHaveBeenCalled();
+    expect(codexAuthManagerMock.enterStartupGate).not.toHaveBeenCalled();
+    expect(
+      codexAuthManagerMock.promoteGroupToGlobalIfNewer,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('classifies refresh_token_reused worker failures as auth_failure', async () => {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      { ...testInput },
+      () => {},
+    );
+    await Promise.resolve();
+
+    fakeProc.stderr.push('refresh_token_reused: token already consumed');
+    fakeProc.emit('close', 1);
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('error');
+    expect(result.failureKind).toBe('auth_failure');
   });
 
   it('redacts remote MCP headers before writing worker logs', async () => {
@@ -654,6 +784,7 @@ describe('container-runner worker execution', () => {
   it('launches a local worker and injects runtimePaths into the worker input', async () => {
     const input: ContainerInput = { ...testInput };
     const resultPromise = runContainerAgent(testGroup, input, () => {});
+    await Promise.resolve();
 
     emitOutputMarker(fakeProc, {
       status: 'success',
@@ -706,6 +837,7 @@ describe('container-runner worker execution', () => {
       },
       () => {},
     );
+    await Promise.resolve();
 
     emitOutputMarker(fakeProc, {
       status: 'success',

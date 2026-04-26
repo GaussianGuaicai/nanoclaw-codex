@@ -186,4 +186,52 @@ describe('task scheduler', () => {
       expect.anything(),
     );
   });
+
+  it('keeps auth failures silent in publishBackgroundActivity', async () => {
+    runSingleTurnAgentTaskMock.mockResolvedValueOnce({
+      status: 'error',
+      result: null,
+      error: 'refresh_token_reused',
+      failureKind: 'auth_failure',
+    });
+
+    createTask({
+      id: 'task-auth-failure',
+      group_folder: 'test-group',
+      chat_jid: 'test@g.us',
+      prompt: 'test',
+      schedule_type: 'once',
+      schedule_value: '2026-01-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 1_000).toISOString(),
+      status: 'active',
+      created_at: '2026-01-01T00:00:00.000Z',
+    });
+
+    const enqueueTask = vi.fn(
+      (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+        void fn();
+      },
+    );
+    const publishBackgroundActivity = vi.fn();
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'test@g.us': {
+          name: 'Test',
+          folder: 'test-group',
+          trigger: '@bot',
+          added_at: '2026-01-01T00:00:00.000Z',
+        },
+      }),
+      getSessions: () => ({}),
+      queue: { enqueueTask } as any,
+      onProcess: () => {},
+      sendMessage: async () => {},
+      publishBackgroundActivity,
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+    expect(publishBackgroundActivity).not.toHaveBeenCalled();
+  });
 });

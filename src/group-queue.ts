@@ -13,18 +13,27 @@ interface QueuedTask {
 
 const MAX_RETRIES = 5;
 const BASE_RETRY_MS = 5000;
+const MAX_AUTH_REPAIR_DELAY_MS = 60000;
+
+type AuthRepairFn = (
+  groupJid: string,
+  reason: string,
+) => boolean | Promise<boolean>;
 
 interface GroupState {
   active: boolean;
   idleWaiting: boolean;
   isTaskWorker: boolean;
   runningTaskId: string | null;
+  authBlocked: boolean;
+  authBlockReason: string | null;
   pendingMessages: boolean;
   pendingTasks: QueuedTask[];
   process: ChildProcess | null;
   executionName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  retryTimer: ReturnType<typeof setTimeout> | null;
 }
 
 export class GroupQueue {
@@ -33,6 +42,7 @@ export class GroupQueue {
   private waitingGroups: string[] = [];
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
+  private authRepairFn: AuthRepairFn | null = null;
   private shuttingDown = false;
 
   private getGroup(groupJid: string): GroupState {
@@ -43,12 +53,15 @@ export class GroupQueue {
         idleWaiting: false,
         isTaskWorker: false,
         runningTaskId: null,
+        authBlocked: false,
+        authBlockReason: null,
         pendingMessages: false,
         pendingTasks: [],
         process: null,
         executionName: null,
         groupFolder: null,
         retryCount: 0,
+        retryTimer: null,
       };
       this.groups.set(groupJid, state);
     }
@@ -59,10 +72,23 @@ export class GroupQueue {
     this.processMessagesFn = fn;
   }
 
+  setAuthRepairFn(fn: AuthRepairFn): void {
+    this.authRepairFn = fn;
+  }
+
   enqueueMessageCheck(groupJid: string): void {
     if (this.shuttingDown) return;
 
     const state = this.getGroup(groupJid);
+    if (state.authBlocked) {
+      state.pendingMessages = true;
+      this.scheduleAuthRecovery(groupJid, state);
+      logger.info(
+        { groupJid, reason: state.authBlockReason },
+        'Auth blocked, message queued until credentials recover',
+      );
+      return;
+    }
 
     if (state.active) {
       state.pendingMessages = true;
@@ -99,6 +125,16 @@ export class GroupQueue {
     }
     if (state.pendingTasks.some((t) => t.id === taskId)) {
       logger.debug({ groupJid, taskId }, 'Task already queued, skipping');
+      return;
+    }
+
+    if (state.authBlocked) {
+      state.pendingTasks.push({ id: taskId, groupJid, fn });
+      this.scheduleAuthRecovery(groupJid, state);
+      logger.info(
+        { groupJid, taskId, reason: state.authBlockReason },
+        'Auth blocked, task queued until credentials recover',
+      );
       return;
     }
 
@@ -151,6 +187,30 @@ export class GroupQueue {
     if (state.pendingTasks.length > 0) {
       this.closeStdin(groupJid);
     }
+  }
+
+  blockAuth(groupJid: string, reason: string): void {
+    const state = this.getGroup(groupJid);
+    state.authBlocked = true;
+    state.authBlockReason = reason;
+    state.pendingMessages = true;
+    this.clearRetryTimer(state);
+    this.scheduleAuthRecovery(groupJid, state);
+    logger.warn({ groupJid }, 'Credentials blocked for group');
+  }
+
+  clearAuthBlock(groupJid: string): void {
+    const state = this.getGroup(groupJid);
+    if (!state.authBlocked) return;
+    state.authBlocked = false;
+    state.authBlockReason = null;
+    state.retryCount = 0;
+    this.clearRetryTimer(state);
+    logger.info({ groupJid }, 'Credentials unblocked for group');
+  }
+
+  isAuthBlocked(groupJid: string): boolean {
+    return this.getGroup(groupJid).authBlocked;
   }
 
   /**
@@ -213,6 +273,7 @@ export class GroupQueue {
     reason: 'messages' | 'drain',
   ): Promise<void> {
     const state = this.getGroup(groupJid);
+    this.clearRetryTimer(state);
     state.active = true;
     state.idleWaiting = false;
     state.isTaskWorker = false;
@@ -276,6 +337,21 @@ export class GroupQueue {
   }
 
   private scheduleRetry(groupJid: string, state: GroupState): void {
+    if (state.authBlocked) {
+      logger.info(
+        { groupJid },
+        'Skipping retry scheduling because credentials are blocked',
+      );
+      return;
+    }
+    if (state.retryTimer) {
+      logger.debug(
+        { groupJid, retryCount: state.retryCount },
+        'Retry already scheduled, skipping duplicate timer',
+      );
+      return;
+    }
+
     state.retryCount++;
     if (state.retryCount > MAX_RETRIES) {
       logger.error(
@@ -291,17 +367,80 @@ export class GroupQueue {
       { groupJid, retryCount: state.retryCount, delayMs },
       'Scheduling retry with backoff',
     );
-    setTimeout(() => {
+    state.retryTimer = setTimeout(() => {
+      state.retryTimer = null;
       if (!this.shuttingDown) {
         this.enqueueMessageCheck(groupJid);
       }
     }, delayMs);
   }
 
+  private scheduleAuthRecovery(groupJid: string, state: GroupState): void {
+    if (!state.authBlocked || this.shuttingDown) return;
+    if (!this.authRepairFn) {
+      logger.debug(
+        { groupJid },
+        'No auth repair callback configured for blocked group',
+      );
+      return;
+    }
+    if (state.retryTimer) {
+      logger.debug(
+        { groupJid, retryCount: state.retryCount },
+        'Auth repair retry already scheduled, skipping duplicate timer',
+      );
+      return;
+    }
+
+    state.retryCount++;
+    const delayMs = Math.min(
+      BASE_RETRY_MS * Math.pow(2, state.retryCount - 1),
+      MAX_AUTH_REPAIR_DELAY_MS,
+    );
+    logger.info(
+      { groupJid, retryCount: state.retryCount, delayMs },
+      'Scheduling auth repair retry',
+    );
+    state.retryTimer = setTimeout(() => {
+      state.retryTimer = null;
+      this.runAuthRecovery(groupJid).catch((err) =>
+        logger.warn({ groupJid, err }, 'Auth repair retry failed'),
+      );
+    }, delayMs);
+  }
+
+  private async runAuthRecovery(groupJid: string): Promise<void> {
+    if (this.shuttingDown) return;
+    const state = this.getGroup(groupJid);
+    if (!state.authBlocked || !this.authRepairFn) return;
+
+    const reason = state.authBlockReason || 'auth_failure';
+    let repaired = false;
+    try {
+      repaired = await this.authRepairFn(groupJid, reason);
+    } catch (err) {
+      logger.warn({ groupJid, err }, 'Auth repair callback failed');
+    }
+
+    if (repaired) {
+      this.clearAuthBlock(groupJid);
+      this.drainGroup(groupJid);
+      logger.info({ groupJid }, 'Auth repair retry succeeded');
+      return;
+    }
+
+    logger.warn({ groupJid }, 'Auth repair retry did not recover credentials');
+    this.scheduleAuthRecovery(groupJid, state);
+  }
+
   private drainGroup(groupJid: string): void {
     if (this.shuttingDown) return;
 
     const state = this.getGroup(groupJid);
+    if (state.authBlocked) {
+      this.drainWaiting();
+      return;
+    }
 
     // Tasks first (they won't be re-discovered from SQLite like messages)
     if (state.pendingTasks.length > 0) {
@@ -359,6 +498,12 @@ export class GroupQueue {
     }
   }
 
+  private clearRetryTimer(state: GroupState): void {
+    if (!state.retryTimer) return;
+    clearTimeout(state.retryTimer);
+    state.retryTimer = null;
+  }
+
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 
@@ -367,6 +512,7 @@ export class GroupQueue {
     // This prevents WhatsApp reconnection restarts from killing working agents.
     const activeWorkers: string[] = [];
     for (const [jid, state] of this.groups) {
+      this.clearRetryTimer(state);
       if (state.process && !state.process.killed && state.executionName) {
         activeWorkers.push(state.executionName);
       }

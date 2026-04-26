@@ -26,10 +26,13 @@ import {
 
 describe('appendWebSocketEventLog', () => {
   afterEach(() => {
-    try {
-      fs.unlinkSync(testLogPath);
-    } catch {
-      // ignore missing file
+    for (let suffix = 0; suffix <= 10; suffix++) {
+      const target = suffix === 0 ? testLogPath : `${testLogPath}.${suffix}`;
+      try {
+        fs.unlinkSync(target);
+      } catch {
+        // ignore missing file
+      }
     }
   });
 
@@ -115,5 +118,40 @@ describe('appendWebSocketEventLog', () => {
       error?: string;
     };
     expect(entry.error).toBe('Worker failed');
+  });
+
+  it('rotates oversized provider logs and still appends JSON lines', () => {
+    fs.mkdirSync('/tmp/nanoclaw-test-logs', { recursive: true });
+    fs.writeFileSync(testLogPath, 'X'.repeat(10 * 1024 * 1024 + 1), 'utf-8');
+
+    appendWebSocketEventLog(
+      {
+        connectionName: 'ha_main',
+        subscriptionId: 'front-door',
+        provider: 'home_assistant',
+        eventType: 'state_changed',
+        occurredAt: '2026-03-12T08:00:00.000Z',
+        payload: {
+          data: {
+            entity_id: 'binary_sensor.front_door',
+          },
+        },
+      },
+      {
+        id: 'front-door',
+        connection: 'ha_main',
+        kind: 'events',
+        eventType: 'state_changed',
+        targetJid: 'slack:C123',
+        promptTemplate: 'Handle {{event_type}}',
+      },
+      'logged',
+    );
+
+    expect(fs.existsSync(`${testLogPath}.1`)).toBe(true);
+    const content = fs.readFileSync(testLogPath, 'utf-8').trim();
+    const entry = JSON.parse(content) as Record<string, unknown>;
+    expect(entry.status).toBe('logged');
+    expect(entry.provider).toBe('home_assistant');
   });
 });

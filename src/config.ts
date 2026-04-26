@@ -6,7 +6,12 @@ import { readEnvFile } from './env.js';
 // Read config values from .env (falls back to process.env).
 // Secrets are NOT read here — they stay on disk and are loaded only
 // where needed (container-runner.ts) to avoid leaking to child processes.
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER']);
+const envConfig = readEnvFile([
+  'ASSISTANT_NAME',
+  'ASSISTANT_HAS_OWN_NUMBER',
+  'NANOCLAW_CODEX_AUTH_SOURCE_DIR',
+  'NANOCLAW_CODEX_AUTH_AUTOREPAIR',
+]);
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
@@ -51,6 +56,16 @@ export const GROUP_SECRETS_PATH = path.join(
   'nanoclaw',
   'group-secrets.json',
 );
+export const CODEX_AUTH_SOURCE_DIR =
+  process.env.NANOCLAW_CODEX_AUTH_SOURCE_DIR ||
+  envConfig.NANOCLAW_CODEX_AUTH_SOURCE_DIR ||
+  path.join(HOME_DIR, '.config', 'nanoclaw', 'codex-auth');
+export const CODEX_AUTH_AUTOREPAIR =
+  (
+    process.env.NANOCLAW_CODEX_AUTH_AUTOREPAIR ||
+    envConfig.NANOCLAW_CODEX_AUTH_AUTOREPAIR ||
+    'true'
+  ).toLowerCase() !== 'false';
 export const CONTEXT_CONFIG_PATH = path.join(
   HOME_DIR,
   '.config',

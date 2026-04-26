@@ -9,6 +9,10 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
+  codexAuthManager,
+  ContainerFailureKind,
+} from './codex-auth-manager.js';
+import {
   buildLiveSessionKey,
   getPromptWithBootstrapDetails,
   isContextSourceEnabled,
@@ -17,6 +21,7 @@ import {
 } from './context-runtime.js';
 import { formatVisibleOutbound } from './router.js';
 import { GroupQueue } from './group-queue.js';
+import { logger } from './logger.js';
 import { loadWorkerAgentConfig } from './worker-config.js';
 import {
   AgentExecutionConfig,
@@ -55,6 +60,7 @@ export interface AgentTaskResult {
   status: 'success' | 'error';
   result: string | null;
   error: string | null;
+  failureKind?: ContainerFailureKind;
   usage?: TurnUsage;
 }
 
@@ -160,6 +166,7 @@ export async function runSingleTurnAgentTask(
 
   let result: string | null = null;
   let error: string | null = null;
+  let failureKind: ContainerFailureKind | undefined;
   let usage: TurnUsage | undefined;
 
   const TASK_CLOSE_DELAY_MS = 10000;
@@ -196,6 +203,7 @@ export async function runSingleTurnAgentTask(
 
     if (output.status === 'error') {
       error = output.error || 'Unknown error';
+      failureKind = output.failureKind || failureKind;
     }
   };
 
@@ -235,6 +243,7 @@ export async function runSingleTurnAgentTask(
 
     if (output.status === 'error') {
       error = output.error || 'Unknown error';
+      failureKind = output.failureKind || failureKind;
     } else if (output.result) {
       result = output.result;
     }
@@ -244,6 +253,26 @@ export async function runSingleTurnAgentTask(
   } catch (err) {
     if (closeTimer) clearTimeout(closeTimer);
     error = err instanceof Error ? err.message : String(err);
+    failureKind = 'worker_error';
+  }
+
+  if (failureKind === 'auth_failure' && codexAuthManager.isEnabled()) {
+    const reason = error || 'auth_failure';
+    deps.queue.blockAuth(request.chatJid, reason);
+    const repaired = codexAuthManager.attemptAutoRepair(group.folder, reason);
+    if (repaired) {
+      deps.queue.clearAuthBlock(request.chatJid);
+      deps.queue.enqueueMessageCheck(request.chatJid);
+      logger.info(
+        { group: group.name, source: request.source },
+        'Auth auto-repair succeeded for task execution',
+      );
+    } else {
+      logger.warn(
+        { group: group.name, source: request.source },
+        'Auth auto-repair failed for task execution; group stays blocked',
+      );
+    }
   }
 
   if (!error && contextParticipation.enabled && result) {
@@ -289,6 +318,7 @@ export async function runSingleTurnAgentTask(
     status: error ? 'error' : 'success',
     result,
     error,
+    failureKind,
     usage,
   };
 }

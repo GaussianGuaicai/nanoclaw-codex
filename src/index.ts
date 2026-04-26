@@ -30,6 +30,7 @@ import {
   prepareContextSessionForTurn,
   recordCompletedContextTurn,
 } from './context-runtime.js';
+import { codexAuthManager } from './codex-auth-manager.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -48,6 +49,10 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
+import {
+  LOG_MAINTENANCE_INTERVAL_MS,
+  pruneAllWorkerLogs,
+} from './log-maintenance.js';
 import {
   findChannel,
   formatContextTurnMessages,
@@ -131,7 +136,34 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+queue.setAuthRepairFn((chatJid, reason) => {
+  const group = registeredGroups[chatJid];
+  if (!group) {
+    logger.warn({ chatJid }, 'Auth repair retry skipped for unknown group');
+    return false;
+  }
+  return codexAuthManager.attemptAutoRepair(group.folder, reason);
+});
 let webSocketSourceManager: WebSocketSourceManager | null = null;
+let logMaintenanceTimer: NodeJS.Timeout | null = null;
+
+function runLogMaintenancePass(): void {
+  pruneAllWorkerLogs();
+}
+
+function startLogMaintenanceLoop(): void {
+  if (logMaintenanceTimer) {
+    clearInterval(logMaintenanceTimer);
+  }
+
+  logMaintenanceTimer = setInterval(() => {
+    try {
+      runLogMaintenancePass();
+    } catch (err) {
+      logger.warn({ err }, 'Periodic log maintenance failed');
+    }
+  }, LOG_MAINTENANCE_INTERVAL_MS);
+}
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -304,6 +336,42 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
+
+  if (output.failureKind === 'auth_failure' && codexAuthManager.isEnabled()) {
+    const reason = output.error || 'auth_failure';
+    if (outputSentToUser) {
+      logger.warn(
+        { group: group.name },
+        'Auth failure happened after output was sent, skipping cursor rollback',
+      );
+    } else {
+      // Preserve pending messages for replay after credentials recover.
+      lastAgentTimestamp[chatJid] = previousCursor;
+      saveState();
+      logger.warn(
+        { group: group.name },
+        'Auth failure detected, rolled back message cursor for recovery',
+      );
+    }
+
+    queue.blockAuth(chatJid, reason);
+    const repaired = codexAuthManager.attemptAutoRepair(group.folder, reason);
+    if (repaired) {
+      queue.clearAuthBlock(chatJid);
+      queue.enqueueMessageCheck(chatJid);
+      logger.info(
+        { group: group.name },
+        'Auth auto-repair succeeded, resumed queued messages',
+      );
+    } else {
+      logger.warn(
+        { group: group.name },
+        'Auth auto-repair failed, group remains blocked',
+      );
+    }
+    // Auth failures are handled by the auth manager path, not generic retries.
+    return true;
+  }
 
   if (output.status === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
@@ -600,15 +668,27 @@ function enqueueWebSocketEventTask(params: {
             subscriptionId: params.subscriptionId,
             targetJid: params.targetJid,
             error: execution.error,
+            failureKind: execution.failureKind,
           },
           'WS event task failed',
         );
-        publishBackgroundActivity({
-          chatJid: params.targetJid,
-          source: 'websocket',
-          result: execution.result,
-          error: execution.error,
-        });
+        if (execution.failureKind !== 'auth_failure') {
+          publishBackgroundActivity({
+            chatJid: params.targetJid,
+            source: 'websocket',
+            result: execution.result,
+            error: execution.error,
+          });
+        } else {
+          logger.info(
+            {
+              connection: params.connectionName,
+              subscriptionId: params.subscriptionId,
+              targetJid: params.targetJid,
+            },
+            'Suppressing WS auth failure output (silent auth recovery mode)',
+          );
+        }
       } else {
         logger.info(
           {
@@ -754,10 +834,19 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   initializeGlobalAgentConfig();
   loadState();
+  try {
+    runLogMaintenancePass();
+  } catch (err) {
+    logger.warn({ err }, 'Startup log maintenance failed');
+  }
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    if (logMaintenanceTimer) {
+      clearInterval(logMaintenanceTimer);
+      logMaintenanceTimer = null;
+    }
     await queue.shutdown(10000);
     if (webSocketSourceManager) {
       await webSocketSourceManager.stop();
@@ -886,6 +975,7 @@ async function main(): Promise<void> {
       }
     },
   });
+  startLogMaintenanceLoop();
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {

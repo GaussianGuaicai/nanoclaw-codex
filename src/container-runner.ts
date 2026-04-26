@@ -13,10 +13,16 @@ import {
   GROUPS_DIR,
   IDLE_TIMEOUT,
 } from './config.js';
+import {
+  classifyFailureKind,
+  codexAuthManager,
+  ContainerFailureKind,
+} from './codex-auth-manager.js';
 import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { resolveGroupWorkerEnv } from './group-secrets.js';
 import { logger } from './logger.js';
+import { pruneWorkerLogsForGroup } from './log-maintenance.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import {
   dedupeInstructionPaths,
@@ -84,6 +90,7 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  failureKind?: ContainerFailureKind;
   usage?: TurnUsage;
 }
 
@@ -739,6 +746,33 @@ export async function runContainerAgent(
   const logsDir = path.join(groupPath, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
 
+  input.sdkSecrets = readSdkSecrets();
+  input.workerEnv = resolveGroupWorkerEnv(group.folder);
+  const usesCodexHomeAuth = !input.sdkSecrets.OPENAI_API_KEY;
+  let releaseStartupGate: (() => void) | null = null;
+
+  if (usesCodexHomeAuth && codexAuthManager.isEnabled()) {
+    try {
+      releaseStartupGate = await codexAuthManager.enterStartupGate(
+        group.folder,
+      );
+    } catch (err) {
+      logger.warn(
+        { group: group.name, err },
+        'auth-manager: startup gate acquire failed',
+      );
+    }
+
+    try {
+      codexAuthManager.syncGlobalToGroup(group.folder);
+    } catch (err) {
+      logger.warn(
+        { group: group.name, err },
+        'auth-manager: startup sync failed',
+      );
+    }
+  }
+
   return new Promise((resolve) => {
     const worker = spawn(launch.command, launch.args, {
       cwd: process.cwd(),
@@ -752,8 +786,6 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    input.sdkSecrets = readSdkSecrets();
-    input.workerEnv = resolveGroupWorkerEnv(group.folder);
     const loggableInput = redactWorkerInputForLogging(input);
     worker.stdin.write(JSON.stringify(input));
     worker.stdin.end();
@@ -763,11 +795,37 @@ export async function runContainerAgent(
     let parseBuffer = '';
     let newSessionId: string | undefined;
     let latestUsage: TurnUsage | undefined;
+    let latestFailureKind: ContainerFailureKind | undefined;
     let outputChain = Promise.resolve();
     const streamedResults: string[] = [];
 
+    let startupGateReleased = false;
+    const releaseGateIfHeld = (reason: string) => {
+      if (!releaseStartupGate || startupGateReleased) return;
+      startupGateReleased = true;
+      releaseStartupGate();
+      logger.debug({ group: group.name, reason }, 'Released startup auth gate');
+    };
+    const promoteGlobalCredentialsIfNeeded = () => {
+      if (!(usesCodexHomeAuth && codexAuthManager.isEnabled())) return;
+      try {
+        codexAuthManager.promoteGroupToGlobalIfNewer(group.folder);
+      } catch (err) {
+        logger.warn(
+          { group: group.name, err },
+          'auth-manager: failed to promote group credentials',
+        );
+      }
+    };
+
     worker.stdout.on('data', (data) => {
       const chunk = data.toString();
+      if (
+        chunk.includes(OUTPUT_START_MARKER) ||
+        chunk.includes(OUTPUT_END_MARKER)
+      ) {
+        releaseGateIfHeld('output_marker');
+      }
 
       if (!stdoutTruncated) {
         const remaining = AGENT_MAX_OUTPUT_SIZE - stdout.length;
@@ -798,6 +856,11 @@ export async function runContainerAgent(
 
         try {
           const parsed: ContainerOutput = JSON.parse(jsonStr);
+          if (parsed.status === 'error') {
+            parsed.failureKind =
+              parsed.failureKind || classifyFailureKind(parsed.error);
+            latestFailureKind = parsed.failureKind;
+          }
           if (parsed.newSessionId) {
             newSessionId = parsed.newSessionId;
           }
@@ -827,6 +890,13 @@ export async function runContainerAgent(
       const chunk = data.toString();
       const lines = chunk.trim().split('\n');
       for (const line of lines) {
+        if (
+          line.includes('[codex] turn started') ||
+          line.includes('[codex] turn failed') ||
+          line.includes('[codex] stream error')
+        ) {
+          releaseGateIfHeld('codex_event');
+        }
         if (line) logger.debug({ worker: group.folder }, line);
       }
       if (stderrTruncated) return;
@@ -851,6 +921,7 @@ export async function runContainerAgent(
 
     const killOnTimeout = () => {
       timedOut = true;
+      releaseGateIfHeld('timeout');
       logger.error({ group: group.name, executionName }, 'Worker timed out');
       worker.kill('SIGKILL');
     };
@@ -863,6 +934,7 @@ export async function runContainerAgent(
 
     worker.on('close', (code) => {
       clearTimeout(timeout);
+      releaseGateIfHeld('close');
       const duration = Date.now() - startTime;
 
       if (timedOut) {
@@ -885,6 +957,14 @@ export async function runContainerAgent(
             loggableTimeoutLayout.sharedInstructionFiles.join('\n') || '(none)',
           ].join('\n'),
         );
+        try {
+          pruneWorkerLogsForGroup(groupPath);
+        } catch (err) {
+          logger.warn(
+            { err, group: group.name, groupPath },
+            'Failed to prune worker logs after timeout',
+          );
+        }
 
         if (hadStreamingOutput) {
           logger.info(
@@ -906,6 +986,7 @@ export async function runContainerAgent(
           status: 'error',
           result: null,
           error: `Worker timed out after ${configuredTimeout}ms`,
+          failureKind: 'timeout',
           usage: latestUsage,
         });
         return;
@@ -990,6 +1071,16 @@ export async function runContainerAgent(
       }
 
       fs.writeFileSync(logFile, logLines.join('\n'));
+      try {
+        pruneWorkerLogsForGroup(groupPath);
+      } catch (err) {
+        logger.warn(
+          { err, group: group.name, groupPath },
+          'Failed to prune worker logs after write',
+        );
+      }
+
+      promoteGlobalCredentialsIfNeeded();
 
       if (code !== 0) {
         logger.error(
@@ -1008,6 +1099,7 @@ export async function runContainerAgent(
           status: 'error',
           result: null,
           error: `Worker exited with code ${code}: ${stderr.slice(-200)}`,
+          failureKind: latestFailureKind || classifyFailureKind(stderr),
         });
         return;
       }
@@ -1043,6 +1135,10 @@ export async function runContainerAgent(
         }
 
         const output: ContainerOutput = JSON.parse(jsonLine);
+        if (output.status === 'error') {
+          output.failureKind =
+            output.failureKind || classifyFailureKind(output.error);
+        }
         if (output.usage) {
           latestUsage = output.usage;
         }
@@ -1068,12 +1164,14 @@ export async function runContainerAgent(
           status: 'error',
           result: null,
           error: `Failed to parse worker output: ${err instanceof Error ? err.message : String(err)}`,
+          failureKind: 'output_parse_error',
         });
       }
     });
 
     worker.on('error', (err) => {
       clearTimeout(timeout);
+      releaseGateIfHeld('spawn_error');
       logger.error(
         { group: group.name, executionName, error: err },
         'Worker spawn error',
@@ -1082,6 +1180,7 @@ export async function runContainerAgent(
         status: 'error',
         result: null,
         error: `Worker spawn error: ${err.message}`,
+        failureKind: 'spawn_error',
       });
     });
   });

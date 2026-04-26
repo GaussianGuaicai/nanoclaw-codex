@@ -170,9 +170,9 @@ The runtime defaults to `workspace-write` sandbox mode with `approval_policy=nev
 - File-based IPC between the host orchestrator and the worker MCP server
 - Per-group remote MCP server attachments
 - Host-side WebSocket event subscriptions with immediate task execution
-- Skill-based channel installation (`$add-whatsapp`, `$add-telegram`, `$add-slack`, `$add-discord`, `$add-gmail`)
+- Skill-based channel installation (`$add-imessage`, `$add-whatsapp`, `$add-telegram`, `$add-slack`, `$add-discord`, `$add-gmail`)
 
-The base core is intentionally channel-light. Channels are added by skills that patch `src/channels/` and self-register at startup. Customized checkouts may already include applied channel skills; this checkout currently has Slack applied, which is why `src/channels/slack.ts` is present.
+The base core is intentionally channel-light. Channels are added by skills that patch `src/channels/` and self-register at startup. Customized checkouts may already include applied channel skills; this checkout currently has iMessage and Slack applied, which is why `src/channels/imessage.ts` and `src/channels/slack.ts` are present.
 
 ## Requirements
 

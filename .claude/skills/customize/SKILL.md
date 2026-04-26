@@ -1,6 +1,6 @@
 ---
 name: customize
-description: Add new capabilities or modify NanoClaw behavior. Use when user wants to add channels (Telegram, Slack, email input), change triggers, add integrations, modify the router, or make any other customizations. This is an interactive skill that asks questions to understand what the user wants.
+description: Add new capabilities or modify NanoClaw behavior. Use when user wants to add channels (iMessage, Telegram, Slack, email input), change triggers, add integrations, modify the router, or make any other customizations. This is an interactive skill that asks questions to understand what the user wants.
 ---
 
 # NanoClaw Customization
@@ -34,10 +34,10 @@ This skill helps users add capabilities or modify behavior. Ask concise clarifyi
 
 ## Common Customization Patterns
 
-### Adding a New Input Channel (e.g., Telegram, Slack, Email)
+### Adding a New Input Channel (e.g., iMessage, Telegram, Slack, Email)
 
 Questions to ask:
-- Which channel? (Telegram, Slack, Discord, email, SMS, etc.)
+- Which channel? (iMessage, Telegram, Slack, Discord, email, SMS, etc.)
 - Same trigger word or different?
 - Same memory hierarchy or separate?
 - Should messages from this channel go to existing groups or new ones?

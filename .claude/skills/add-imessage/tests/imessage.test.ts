@@ -69,6 +69,7 @@ describe('add-imessage skill package', () => {
     expect(skillMd).toContain('local-macos');
     expect(skillMd).toContain('bluebubbles');
     expect(skillMd).toContain('imessage:<stable-chat-id>');
+    expect(skillMd).toContain('groups.<folder>.env');
 
     const setupMd = fs.readFileSync(
       path.join(skillDir, 'IMESSAGE_SETUP.md'),
@@ -76,5 +77,7 @@ describe('add-imessage skill package', () => {
     );
     expect(setupMd).toContain('macOS');
     expect(setupMd).toContain('Messages.app');
+    expect(setupMd).toContain('groups.<folder>.env');
+    expect(setupMd).toContain('workerEnv');
   });
 });

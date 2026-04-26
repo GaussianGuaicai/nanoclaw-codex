@@ -71,7 +71,7 @@ A personal Codex-powered assistant accessible through messaging channels, with m
 **Core components:**
 - **Codex SDK** as the core agent runtime
 - **Local sandboxed worker execution** for isolated agent runs
-- **WhatsApp, Slack, Telegram, Discord, Gmail** as installable channels
+- **iMessage, WhatsApp, Slack, Telegram, Discord, Gmail** as installable channels
 - **Persistent memory** per conversation and globally
 - **Scheduled tasks** that run the agent and can message back
 - **Web access** for search and browsing
@@ -142,7 +142,7 @@ A personal Codex-powered assistant accessible through messaging channels, with m
 ### Channels
 - Channels self-register through `src/channels/registry.ts`
 - Installed channels store messages in SQLite, and the router polls them uniformly
-- WhatsApp, Telegram, Slack, Discord, and Gmail are provided as installable skills
+- iMessage, WhatsApp, Telegram, Slack, Discord, and Gmail are provided as installable skills
 
 ### Scheduler
 - Built-in scheduler runs on the host and spawns isolated worker runs for task execution
@@ -191,7 +191,7 @@ These are the creator's settings, stored here for reference:
 - **Trigger**: `@Andy` (case insensitive)
 - **Response prefix**: none added by the router; outbound text is sent as returned after stripping `<internal>...</internal>` blocks
 - **Persona**: Default Codex (no custom personality)
-- **Main channel**: Self-chat (messaging yourself in WhatsApp)
+- **Main channel**: Self-chat (messaging yourself in the primary channel)
 
 ---
 

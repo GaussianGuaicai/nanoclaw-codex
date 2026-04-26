@@ -57,7 +57,7 @@ interface Channel {
 }
 ```
 
-The base architecture supports WhatsApp, Telegram, Slack, Discord, and Gmail as skills. This checkout currently has the Slack skill applied.
+The base architecture supports iMessage, WhatsApp, Telegram, Slack, Discord, and Gmail as skills. This checkout currently has the iMessage and Slack skills applied.
 
 ## Runtime Paths
 
@@ -116,7 +116,7 @@ Precedence:
 task override > source override > group config > global config > legacy env > SDK default
 ```
 
-Group-only worker environment values live in `~/.config/nanoclaw/group-secrets.json`. Only keys declared for that group are exported to that group's worker process.
+Group-only worker environment values live in `~/.config/nanoclaw/group-secrets.json` as `groups.<folder>.env` entries. Only keys declared for that group are exported to that group's worker process.
 
 ## Shared Instructions And Memory
 

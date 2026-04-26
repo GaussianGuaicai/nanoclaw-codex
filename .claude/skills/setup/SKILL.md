@@ -54,6 +54,7 @@ Tell user to add `OPENAI_API_KEY=<key>` to `.env`. Optionally add `OPENAI_BASE_U
 
 Ask which messaging channels to enable:
 - WhatsApp (authenticates via QR code or pairing code)
+- iMessage (local macOS Messages.app backend; requires Full Disk Access and AppleScript permission)
 - Telegram (authenticates via bot token from @BotFather)
 - Slack (authenticates via Slack app with Socket Mode)
 - Discord (authenticates via Discord bot token)
@@ -63,14 +64,15 @@ Ask which messaging channels to enable:
 For each selected channel, invoke its skill:
 
 - **WhatsApp:** Invoke `$add-whatsapp`
+- **iMessage:** Invoke `$add-imessage`
 - **Telegram:** Invoke `$add-telegram`
 - **Slack:** Invoke `$add-slack`
 - **Discord:** Invoke `$add-discord`
 
 Each skill will:
 1. Install the channel code (via `apply-skill`)
-2. Collect credentials/tokens and write to `.env`
-3. Authenticate (WhatsApp QR/pairing, or verify token-based connection)
+2. Collect credentials/tokens or local permission settings as needed and write config to `.env`
+3. Authenticate (WhatsApp QR/pairing, iMessage local permissions, or verify token-based connection)
 4. Register the chat with the correct JID format
 5. Build and verify
 
@@ -121,6 +123,6 @@ Tell user to test: send a message in their registered chat. Show: `tail -f logs/
 
 **No response to messages:** Check trigger pattern. Main channel doesn't need prefix. Check DB: `npx tsx setup/index.ts --step verify`. Check `logs/nanoclaw.log`.
 
-**Channel not connecting:** Verify the channel's credentials are set in `.env`. Channels auto-enable when their credentials are present. For WhatsApp: check `store/auth/creds.json` exists. For token-based channels: check token values in `.env`. Restart the service after any `.env` change.
+**Channel not connecting:** Verify the channel's required config is set in `.env` or the local permissions are in place. Channels auto-enable when their required config is present. For WhatsApp: check `store/auth/creds.json` exists. For iMessage: check `IMESSAGE_ENABLED=true`, `IMESSAGE_BACKEND=local-macos`, Full Disk Access, and AppleScript permission. For token-based channels: check token values in `.env`. Restart the service after any `.env` change.
 
 **Unload service:** macOS: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist` | Linux: `systemctl --user stop nanoclaw`

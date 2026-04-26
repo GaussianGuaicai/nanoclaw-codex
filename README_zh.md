@@ -58,7 +58,7 @@ codex
 
 ## 功能支持
 
-- **多渠道消息** - 通过 WhatsApp、Telegram、Discord、Slack 或 Gmail 与您的助手对话。使用 `$add-whatsapp` 或 `$add-telegram` 等技能添加渠道，可同时运行一个或多个。
+- **多渠道消息** - 通过 iMessage、WhatsApp、Telegram、Discord、Slack 或 Gmail 与您的助手对话。使用 `$add-imessage`、`$add-whatsapp` 或 `$add-telegram` 等技能添加渠道，可同时运行一个或多个。
 - **隔离的群组上下文** - 每个群组都拥有独立的 `AGENTS.md`、独立 `CODEX_HOME`，以及按宿主策略准备的工作目录和文件快照。
 - **主频道** - 您的私有频道（self-chat），用于管理控制；其他所有群组都完全隔离
 - **计划任务** - 运行周期性或一次性的 agent 任务，并可以给您回发消息

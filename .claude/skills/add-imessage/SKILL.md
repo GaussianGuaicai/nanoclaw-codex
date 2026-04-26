@@ -103,7 +103,25 @@ IMESSAGE_ALLOWED_CONTACTS=+15551234567,user@example.com
 ```
 
 The current local-worker runtime reads `.env` from the host directly; there is no `data/env/env` sync step.
-If you want iMessage enabled only for one group, prefer a group-scoped override in `~/.config/nanoclaw/group-secrets.json` instead of a global `.env` toggle.
+If you want iMessage enabled only for one group, prefer a group-scoped `groups.<folder>.env` override in `~/.config/nanoclaw/group-secrets.json` instead of a global `.env` toggle.
+
+Example:
+
+```json
+{
+  "version": 1,
+  "groups": {
+    "main": {
+      "env": {
+        "IMESSAGE_ENABLED": "true",
+        "IMESSAGE_BACKEND": "local-macos"
+      }
+    }
+  }
+}
+```
+
+The host resolves those keys into the worker's `workerEnv` for the matching group.
 
 ## Behavior
 

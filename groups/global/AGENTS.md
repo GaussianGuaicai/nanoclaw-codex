@@ -49,7 +49,7 @@ When you learn something important:
 
 ## Message Formatting
 
-NEVER use markdown. Only use WhatsApp/Telegram formatting:
+NEVER use markdown. Only use plain chat formatting:
 - *single asterisks* for bold (NEVER **double asterisks**)
 - _underscores_ for italic
 - • bullet points

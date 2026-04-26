@@ -71,7 +71,7 @@ The worker receives two separate host-controlled inputs:
   - `OPENAI_API_KEY`
   - `OPENAI_BASE_URL`
   - `NANOCLAW_CODEX_*`
-- Optional group worker env vars from `~/.config/nanoclaw/group-secrets.json`
+- Optional group worker env vars from `~/.config/nanoclaw/group-secrets.json`, stored as `{"version":1,"groups":{"<folder>":{"env":{...}}}}`
 
 SDK secrets are passed from host to worker input, then used to configure Codex.
 They are not exported to the worker process environment.

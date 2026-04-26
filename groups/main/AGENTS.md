@@ -44,16 +44,16 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
-## WhatsApp Formatting (and other messaging apps)
+## Messaging Formatting
 
-Do NOT use markdown headings (##) in WhatsApp messages. Only use:
+Do NOT use markdown headings (##) in chat messages. Only use:
 
 - _Bold_ (single asterisks) (NEVER **double asterisks**)
 - _Italic_ (underscores)
 - • Bullets (bullet points)
 - `Code blocks` (triple backticks)
 
-Keep messages clean and readable for WhatsApp.
+Keep messages clean and readable for chat clients.
 
 ---
 
@@ -94,7 +94,7 @@ Available groups are provided in `../../data/ipc/main/available_groups.json`:
 }
 ```
 
-Groups are ordered by most recent activity. The list is synced from WhatsApp daily.
+Groups are ordered by most recent activity. The list is synced automatically.
 
 If a group the user mentions isn't in the list, request a fresh sync:
 
@@ -133,7 +133,7 @@ Groups are registered in the SQLite `registered_groups` table:
 
 Fields:
 
-- **Key**: The chat JID (unique identifier — WhatsApp, Telegram, Slack, Discord, etc.)
+- **Key**: The chat JID (unique identifier — WhatsApp, Telegram, Discord, etc.)
 - **name**: Display name for the group
 - **folder**: Channel-prefixed folder name under `groups/` for this group's files and memory
 - **trigger**: The trigger word (usually same as global, but could differ)
@@ -161,7 +161,6 @@ Folder naming convention — channel prefix with underscore separator:
 - WhatsApp "Family Chat" → `whatsapp_family-chat`
 - Telegram "Dev Team" → `telegram_dev-team`
 - Discord "General" → `discord_general`
-- Slack "Engineering" → `slack_engineering`
 - Use lowercase, hyphens for the group name part
 
 #### Adding Additional Directories for a Group
